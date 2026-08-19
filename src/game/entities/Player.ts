@@ -4,7 +4,8 @@ import { PlayerCombat } from '../combat/PlayerCombat';
 import { DamageSource } from '../damage/damage';
 import { Health } from '../damage/Health';
 import { PLAYER_HEALTH } from '../damage/health-config';
-import { PLAYER_MOVEMENT } from './player-config';
+import { PLAYER_BODY, PLAYER_MOVEMENT } from './player-config';
+import { syncFacingOffset } from './physics-utils';
 
 type PlayerKeys = {
     attack: Input.Keyboard.Key;
@@ -51,9 +52,9 @@ export class Player extends Physics.Arcade.Sprite {
         this.health = new Health(PLAYER_HEALTH.maxHp, { defense: 0, resistance: {} });
 
         // O corpo do Arcade multiplica o tamanho (fonte) pelo scale do sprite (3x).
-        // 42x42 fonte -> ~126x126 px de mundo, alinhado aos pés do sprite.
-        this.arcadeBody.setSize(42, 42);
-        this.arcadeBody.setOffset(3, 6);
+        // Dimensões medidas a partir do bounding box real do sprite (ver PLAYER_BODY).
+        this.arcadeBody.setSize(PLAYER_BODY.width, PLAYER_BODY.height);
+        this.arcadeBody.setOffset(PLAYER_BODY.offsetX, PLAYER_BODY.offsetY);
         this.arcadeBody.setMaxVelocity(
             PLAYER_MOVEMENT.maxSpeed,
             PLAYER_MOVEMENT.maxFallSpeed
@@ -133,6 +134,10 @@ export class Player extends Physics.Arcade.Sprite {
 
         this.applyVerticalMovement(dt);
         this.updateAnimation(onGround);
+
+        // O corpo físico não acompanha flipX sozinho (ver physics-utils);
+        // resincroniza todo frame com a direção atual do sprite.
+        syncFacingOffset(this.arcadeBody, this.flipX, PLAYER_BODY);
     }
 
     setControlsEnabled(enabled: boolean) {

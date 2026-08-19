@@ -1,6 +1,6 @@
 import { Scene } from 'phaser';
 
-import { EnemyType } from '../entities/Enemy';
+import { EnemyType } from '../damage/health-config';
 
 export function createEnemyAnimations(scene: Scene): void {
     const kinds: EnemyType[] = ['graverobber', 'steamman'];
@@ -19,5 +19,15 @@ export function createEnemyAnimations(scene: Scene): void {
             frameRate: 8,
             repeat: -1
         });
+
+        // 3 variantes de golpe (sorteadas a cada ataque, ver attack-variants.ts).
+        for (let variant = 1; variant <= 3; variant++) {
+            scene.anims.create({
+                key: `${kind}-attack-${variant}`,
+                frames: scene.anims.generateFrameNumbers(`${kind}-attack-${variant}`, { start: 0, end: 5 }),
+                frameRate: 10,
+                repeat: 0
+            });
+        }
     }
 }

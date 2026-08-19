@@ -15,16 +15,35 @@ export class PreloadScene extends Scene {
         this.load.image('sky-clouds-far', 'background/Clouds/2.png');
         this.load.image('sky-clouds-near', 'background/Clouds/3.png');
 
+        // Camadas de parallax da floresta (ver phases.ts). chao/borda-agua vêm
+        // pré-processadas (fundo branco/preto original trocado por alpha e
+        // recortadas pra faixa de conteúdo, ver scripts usados na sessão).
+        this.load.image('forest-sky', 'florest/ceu.png');
+        this.load.image('forest-mountains', 'florest/montanhas.png');
+        this.load.image('forest-trees', 'florest/arvores-casas-trim.png');
+        this.load.image('forest-ground', 'florest/chao-strip.png');
+        this.load.image('forest-water-edge', 'florest/borda-agua-strip.png');
+
         this.load.spritesheet('player-jump', 'player/jump.png', { frameWidth: 48, frameHeight: 48 });
         this.load.spritesheet('player-idle', 'player/idle.png', { frameWidth: 48, frameHeight: 48 });
         this.load.spritesheet('player-walk', 'player/walk.png', { frameWidth: 48, frameHeight: 48 });
-        this.load.spritesheet('player-attack', 'player/attack.png', { frameWidth: 48, frameHeight: 48 });
+
+        // 3 variantes de golpe (sorteadas a cada ataque, ver attack-variants.ts).
+        this.load.spritesheet('player-attack-1', 'player/Woodcutter_attack1.png', { frameWidth: 48, frameHeight: 48 });
+        this.load.spritesheet('player-attack-2', 'player/attack.png', { frameWidth: 48, frameHeight: 48 });
+        this.load.spritesheet('player-attack-3', 'player/Woodcutter_attack3.png', { frameWidth: 48, frameHeight: 48 });
 
         this.load.spritesheet('graverobber-idle', 'enemies/graverobber-idle.png', { frameWidth: 48, frameHeight: 48 });
         this.load.spritesheet('graverobber-walk', 'enemies/graverobber-walk.png', { frameWidth: 48, frameHeight: 48 });
+        this.load.spritesheet('graverobber-attack-1', 'enemies/GraveRobber_attack1.png', { frameWidth: 48, frameHeight: 48 });
+        this.load.spritesheet('graverobber-attack-2', 'enemies/GraveRobber_attack2.png', { frameWidth: 48, frameHeight: 48 });
+        this.load.spritesheet('graverobber-attack-3', 'enemies/GraveRobber_attack3.png', { frameWidth: 48, frameHeight: 48 });
 
         this.load.spritesheet('steamman-idle', 'enemies/steamman-idle.png', { frameWidth: 48, frameHeight: 48 });
         this.load.spritesheet('steamman-walk', 'enemies/steamman-walk.png', { frameWidth: 48, frameHeight: 48 });
+        this.load.spritesheet('steamman-attack-1', 'enemies/SteamMan_attack1.png', { frameWidth: 48, frameHeight: 48 });
+        this.load.spritesheet('steamman-attack-2', 'enemies/SteamMan_attack2.png', { frameWidth: 48, frameHeight: 48 });
+        this.load.spritesheet('steamman-attack-3', 'enemies/SteamMan_attack3.png', { frameWidth: 48, frameHeight: 48 });
     }
 
     create() {

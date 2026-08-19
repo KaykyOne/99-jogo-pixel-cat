@@ -2,7 +2,9 @@ import { GameObjects, Input, Physics, Scene } from 'phaser';
 
 import { MeleeHitbox } from '../combat/MeleeHitbox';
 import { DamageSource } from '../damage/damage';
-import { Enemy, EnemyType } from '../entities/Enemy';
+import { EnemyType } from '../damage/health-config';
+import { BaseEnemy } from '../entities/BaseEnemy';
+import { createEnemy } from '../entities/enemy-factory';
 import { Player } from '../entities/Player';
 import { GROUND_Y, HEIGHT, PHASES, PHASE_WIDTH, PhaseDefinition } from '../world/phases';
 
@@ -22,7 +24,7 @@ export class PhaseScene extends Scene {
     private phaseIndex: number;
 
     private player!: Player;
-    private enemies: Enemy[] = [];
+    private enemies: BaseEnemy[] = [];
     private portals: Portal[] = [];
     private teleporting = false;
     private mapKey!: Input.Keyboard.Key;
@@ -152,7 +154,7 @@ export class PhaseScene extends Scene {
         const phaseSpawns = spawns[this.phase.key] ?? [];
 
         for (const spawn of phaseSpawns) {
-            const enemy = new Enemy(this, spawn.x, GROUND_Y - 80, spawn.type);
+            const enemy = createEnemy(this, spawn.type, spawn.x, GROUND_Y - 80, this.player);
 
             enemy.setDepth(15);
 
@@ -166,7 +168,7 @@ export class PhaseScene extends Scene {
 
     // Resolve um impacto de golpe: garante que cada inimigo só recebe o golpe uma
     // vez e coordena dano, knockback e os efeitos de game feel (hit-stop e shake).
-    private handleImpact(hitbox: MeleeHitbox, enemy: Enemy) {
+    private handleImpact(hitbox: MeleeHitbox, enemy: BaseEnemy) {
         const attack = this.player.combat.activeAttackDefinition;
         if (!attack) {
             return;
@@ -200,7 +202,7 @@ export class PhaseScene extends Scene {
     }
 
     // Dano por contato: o jogador recebe o dano do inimigo ao encostar nele.
-    private handleContactDamage(enemy: Enemy) {
+    private handleContactDamage(enemy: BaseEnemy) {
         if (!enemy.isAlive) {
             return;
         }

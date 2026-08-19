@@ -1,3 +1,14 @@
+// Corpo de colisão do jogador, medido a partir do sprite real (frames de
+// 48x48). O silhueta parado/andando ocupa ~26x34 px de fonte, alinhada aos
+// pés (y até 48); o corpo antigo (42x42) cobria quase o frame inteiro,
+// causando colisões/contato com inimigo muito maiores que o desenho.
+export const PLAYER_BODY = {
+    width: 26,
+    height: 34,
+    offsetX: 1,
+    offsetY: 14
+} as const;
+
 // Parâmetros centralizados da movimentação do jogador.
 // Acelerações estão em px/s², velocidades em px/s e tempos em ms.
 export const PLAYER_MOVEMENT = {

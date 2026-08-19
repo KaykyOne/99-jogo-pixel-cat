@@ -4,7 +4,6 @@ import { Physics } from 'phaser';
 // permite, no futuro, catalogar armas, golpes e combos sem alterar o Player.
 export type AttackDefinition = {
     id: string;
-    animationKey: string;
     cooldownMs: number;
 
     // Dano e reação aplicados ao atingido.

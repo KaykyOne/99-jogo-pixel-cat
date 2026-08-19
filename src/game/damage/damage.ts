@@ -23,10 +23,21 @@ export type DamageableStats = {
 // Aplica defesa e resistência: primeiro desconta a defesa, depois a fração de
 // resistência do tipo. Nunca retorna valor negativo e arredonda para facilitar
 // danos inteiros nos HPs.
+//
+// Garante 1 de dano mínimo sempre que o golpe tinha alguma quantidade de dano
+// (amount > 0): defesa/resistência somadas não podem zerar completamente um
+// ataque válido, senão o alvo fica efetivamente imortal (foi o que aconteceu
+// com o steamman: defense=1 contra um ataque básico de damage=1 resultava em
+// 0 sempre).
 export function resolveDamage(source: DamageSource, stats: DamageableStats): number {
+    if (source.amount <= 0) {
+        return 0;
+    }
+
     const afterDefense = Math.max(0, source.amount - stats.defense);
     const resistance = source.kind ? (stats.resistance[source.kind] ?? 0) : 0;
     const clamped = Math.min(1, Math.max(0, resistance));
 
-    return Math.round(afterDefense * (1 - clamped));
+    const raw = afterDefense * (1 - clamped);
+    return Math.max(1, Math.round(raw));
 }

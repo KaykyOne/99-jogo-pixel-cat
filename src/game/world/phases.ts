@@ -31,15 +31,6 @@ function drawGround(scene: Scene, x0: number, base: number, top: number, speckle
     }
 }
 
-function addStars(scene: Scene, x0: number, count: number) {
-    const g = scene.add.graphics().setDepth(-9);
-    for (let i = 0; i < count; i++) {
-        const sx = x0 + ((i * 137.5 + x0 * 0.13) % PHASE_WIDTH);
-        const sy = 8 + ((i * 73.3) % 150);
-        g.fillStyle(0xffffff, 0.35 + (i % 5) * 0.12).fillRect(sx, sy, 2, 2);
-    }
-}
-
 function drawPine(
     g: GameObjects.Graphics,
     x: number,
@@ -102,55 +93,61 @@ function drawClouds(scene: Scene, x0: number, tint: number) {
 }
 
 export const PHASES: PhaseDefinition[] = [
-    // 1 - Floresta noturna
+    // 1 - Floresta (parallax com arte pintada, ver public/assets/florest)
     {
         key: 'forest',
         name: 'FLORESTA VERDE',
-        subtitle: 'Fronteira da mata noturna',
+        subtitle: 'Fronteira da mata ao amanhecer',
         draw: (scene, x0) => {
-            const sky = scene.add.graphics().setDepth(-10);
-            fillSky(sky, x0, [[170, 0x182b58], [330, 0x274d83], [480, 0x4e78a4], [654, 0xc38d76]]);
-            addStars(scene, x0, 120);
+            // Janela bem mais larga que a fase, pra sobrar cobertura nas bordas
+            // mesmo nas camadas de parallax mais lentas (scrollFactor baixo faz
+            // a camada "atrasar" em relação à câmera).
+            const parallaxX = x0 - 1000;
+            const parallaxWidth = PHASE_WIDTH + 2000;
 
-            const moon = scene.add.graphics().setDepth(-7);
-            moon.fillStyle(0xffe7ae, 0.15).fillCircle(x0 + 2100, 150, 78);
-            moon.fillStyle(0xffe2a1, 0.95).fillCircle(x0 + 2100, 150, 42);
-            moon.fillStyle(0xe7c78b, 0.55).fillCircle(x0 + 2084, 136, 8);
-            moon.fillStyle(0xe7c78b, 0.45).fillCircle(x0 + 2116, 169, 5);
+            // Céu: praticamente parado (scrollFactor quase 0), já traz nuvens e
+            // uma silhueta bem distante de árvores pintadas na própria imagem.
+            const skyScale = HEIGHT / 1086;
+            scene.add
+                .tileSprite(parallaxX, 0, parallaxWidth, HEIGHT, 'forest-sky')
+                .setOrigin(0, 0)
+                .setScrollFactor(0.05, 0)
+                .setTileScale(skyScale, skyScale)
+                .setDepth(-10);
 
-            const far = scene.add.graphics().setDepth(-6);
-            far.fillStyle(0x273c59, 0.95);
-            let fi = 0;
-            for (let x = x0; x < x0 + PHASE_WIDTH; x += 460, fi++) {
-                const peak = 250 + (fi % 3) * 55;
-                far.fillTriangle(x, 544, x + 230, peak, x + 460, 544);
-            }
+            // Montanhas: camada intermediária, base um pouco acima da linha das
+            // árvores pra ficar parcialmente encoberta por elas.
+            const mountainsHeight = 500;
+            const mountainsScale = mountainsHeight / 887;
+            scene.add
+                .tileSprite(parallaxX, 620, parallaxWidth, mountainsHeight, 'forest-mountains')
+                .setOrigin(0, 1)
+                .setScrollFactor(0.2, 0)
+                .setTileScale(mountainsScale, mountainsScale)
+                .setDepth(-6);
 
-            const ridge = scene.add.graphics().setDepth(-5);
-            ridge.fillStyle(0x183845);
-            let ri = 0;
-            for (let x = x0 - 40; x < x0 + PHASE_WIDTH; x += 380, ri++) {
-                const peak = 390 + (ri % 2) * 30;
-                ridge.fillTriangle(x, 600, x + 190, peak, x + 380, 600);
-            }
+            // Árvores e casas: base encostada exatamente na linha do chão
+            // (asset já recortado até o último pixel opaco, sem margem
+            // transparente embaixo — senão sobra um vão entre a árvore e o
+            // chão, com o personagem "flutuando" nele).
+            const treesHeight = 450;
+            const treesScale = treesHeight / 548;
+            scene.add
+                .tileSprite(parallaxX, GROUND_Y +20, parallaxWidth, treesHeight, 'forest-trees')
+                .setOrigin(0, 1)
+                .setScrollFactor(0.45, 0)
+                .setTileScale(treesScale, treesScale)
+                .setDepth(-3);
 
-            const forest = scene.add.graphics().setDepth(-3);
-            let ti = 0;
-            for (let x = 30; x < PHASE_WIDTH - 30; x += 150, ti++) {
-                const s = 0.75 + ((ti * 37) % 60) / 100;
-                const ty = 500 + ((ti * 19) % 50);
-                drawPine(forest, x0 + x, ty, s, 0x213d35, 0x102f31, 0x1d4b43);
-            }
-
-            drawClouds(scene, x0, 0xd7e4f2);
-            drawGround(scene, x0, 0x294b35, 0x6c9351, 0x3d6a42, 0xa9c66a);
-
-            const details = scene.add.graphics().setDepth(2);
-            let di = 0;
-            for (let x = 40; x < PHASE_WIDTH; x += 90, di++) {
-                details.fillStyle(0x88ad58).fillRect(x0 + x, GROUND_Y - 11 - (di % 3) * 4, 3, 14 + (di % 3) * 4);
-                details.fillStyle(0xc2d477).fillRect(x0 + x + 4, GROUND_Y - 7, 3, 9);
-            }
+            // Chão: acompanha o jogo 1:1 (scrollFactor 1), alinhado com o corpo
+            // físico invisível criado em Game.buildPhysics (mesmo GROUND_Y).
+            const groundHeight = HEIGHT - GROUND_Y + 20;
+            const groundScale = groundHeight / 359;
+            scene.add
+                .tileSprite(x0, GROUND_Y - 15, PHASE_WIDTH, groundHeight, 'forest-ground')
+                .setOrigin(0, 0)
+                .setTileScale(groundScale, groundScale)
+                .setDepth(0);
         }
     },
     // 2 - Deserto

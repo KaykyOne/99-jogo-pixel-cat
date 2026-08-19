@@ -1,6 +1,7 @@
 import { Physics } from 'phaser';
 
 import { ATTACKS } from './attacks';
+import { randomAttackAnimationKey } from './attack-variants';
 import { MeleeHitbox } from './MeleeHitbox';
 import { AttackDefinition } from './types';
 
@@ -102,8 +103,11 @@ export class PlayerCombat {
         // mas a hitbox é a única fonte de verdade para o impacto agora.
         this.owner.emit('attack', this.owner);
 
-        this.owner.play(definition.animationKey);
-        this.owner.once('animationcomplete-' + definition.animationKey, () => this.onAttackAnimationComplete());
+        // Sorteia uma das 3 variantes visuais do golpe (ver attack-variants.ts);
+        // todas têm o mesmo timing de 6 frames, então a hitbox não muda.
+        const animationKey = randomAttackAnimationKey('player');
+        this.owner.play(animationKey);
+        this.owner.once('animationcomplete-' + animationKey, () => this.onAttackAnimationComplete());
     }
 
     private endAttack(): void {

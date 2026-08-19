@@ -15,18 +15,22 @@ export function createPlayerAnimations(scene: Scene) {
         repeat: 0
     });
 
-    scene.anims.create({
-        key: 'player-attack',
+    // 3 variantes de golpe (sorteadas a cada ataque, ver attack-variants.ts),
+    // todas com o mesmo timing de 6 frames.
+    for (let variant = 1; variant <= 3; variant++) {
+        scene.anims.create({
+            key: `player-attack-${variant}`,
 
-        frames: scene.anims.generateFrameNumbers('player-attack', {
-            start: 0,
-            end: 5
-        }),
+            frames: scene.anims.generateFrameNumbers(`player-attack-${variant}`, {
+                start: 0,
+                end: 5
+            }),
 
-        frameRate: 10,
+            frameRate: 10,
 
-        repeat: 0
-    });
+            repeat: 0
+        });
+    }
 
     scene.anims.create({
         key: 'player-idle',
