@@ -4,6 +4,12 @@ export const HEIGHT = 768;
 export const GROUND_Y = 654;
 export const PHASE_WIDTH = 2560;
 
+// Linha d'água do lago da floresta: só a faixa abaixo dela vira reflexo de
+// câmera (ver PhaseScene.setupLakeReflection em Game.ts). Fica abaixo do
+// GROUND_Y pra sobrar uma tira de grama/terra visível entre o chão andável e
+// a água.
+export const FOREST_WATER_TOP_Y = GROUND_Y + 30;
+
 export type PhaseDefinition = {
     key: string;
     name: string;
@@ -65,6 +71,23 @@ function sunsetStripes(g: GameObjects.Graphics, x0: number, stops: [number, numb
         g.fillStyle(color).fillRect(x0, bottom, PHASE_WIDTH, prev - bottom);
         prev = bottom;
     }
+}
+
+// Base sólida da água, cobrindo a fase inteira abaixo de FOREST_WATER_TOP_Y.
+// O reflexo em si (câmera ao vivo espelhada, mostrando cenário/jogador/
+// inimigos de verdade) é montado em Game.ts, que mistura o resultado por
+// cima desta cor via câmera com alpha reduzido.
+function drawWaterBase(scene: Scene, x0: number) {
+    scene.add
+        .rectangle(x0, FOREST_WATER_TOP_Y, PHASE_WIDTH, HEIGHT - FOREST_WATER_TOP_Y, 0x1c4258)
+        .setOrigin(0, 0)
+        .setDepth(0.5);
+
+    scene.add
+        .tileSprite(x0, FOREST_WATER_TOP_Y - 8, PHASE_WIDTH, 16, 'forest-water-edge')
+        .setOrigin(0, 0)
+        .setTileScale(16 / 207, 16 / 207)
+        .setDepth(0.6);
 }
 
 function drawClouds(scene: Scene, x0: number, tint: number) {
@@ -148,6 +171,10 @@ export const PHASES: PhaseDefinition[] = [
                 .setOrigin(0, 0)
                 .setTileScale(groundScale, groundScale)
                 .setDepth(0);
+
+            // Base d'água por baixo do chão inteiro; o reflexo ao vivo (câmera
+            // espelhada) é ligado em Game.ts depois que HUD/mapa existem.
+            drawWaterBase(scene, x0);
         }
     },
     // 2 - Deserto

@@ -1,4 +1,4 @@
-import { GameObjects, Input, Physics, Scene } from 'phaser';
+import { Cameras, GameObjects, Input, Physics, Scene } from 'phaser';
 
 import { MeleeHitbox } from '../combat/MeleeHitbox';
 import { DamageSource } from '../damage/damage';
@@ -6,7 +6,7 @@ import { EnemyType } from '../damage/health-config';
 import { BaseEnemy } from '../entities/BaseEnemy';
 import { createEnemy } from '../entities/enemy-factory';
 import { Player } from '../entities/Player';
-import { GROUND_Y, HEIGHT, PHASES, PHASE_WIDTH, PhaseDefinition } from '../world/phases';
+import { FOREST_WATER_TOP_Y, GROUND_Y, HEIGHT, PHASES, PHASE_WIDTH, PhaseDefinition } from '../world/phases';
 
 type Portal = {
     zoneX: number;
@@ -33,6 +33,12 @@ export class PhaseScene extends Scene {
     private mapLocationText!: GameObjects.Text;
     private hpText!: GameObjects.Text;
     private lastHp = -1;
+
+    // Câmera do reflexo do lago (só existe na fase 'forest', ver
+    // setupLakeReflection). Precisa ignorar HUD/mapa, por isso os elementos
+    // de UI ficam guardados aqui conforme são criados.
+    private reflectionCam?: Cameras.Scene2D.Camera;
+    private hudObjects: GameObjects.GameObject[] = [];
 
     constructor(phase: PhaseDefinition, phaseIndex: number) {
         super(phase.key);
@@ -85,6 +91,10 @@ export class PhaseScene extends Scene {
         camera.setBounds(0, 0, PHASE_WIDTH, HEIGHT);
         camera.startFollow(this.player, true, 0.1, 0.1);
         camera.fadeIn(220, 0, 0, 0);
+
+        if (this.phase.key === 'forest') {
+            this.setupLakeReflection();
+        }
     }
 
     update(time: number, delta: number) {
@@ -118,6 +128,13 @@ export class PhaseScene extends Scene {
 
         if (this.mapOverlay.visible) {
             this.updateMapMarker();
+        }
+
+        // A câmera do reflexo é um objeto à parte da câmera principal — ela não
+        // segue o jogador sozinha, então o scroll horizontal é copiado todo
+        // frame pra mostrar a mesma fatia do mundo, só que espelhada.
+        if (this.reflectionCam) {
+            this.reflectionCam.scrollX = this.cameras.main.scrollX;
         }
     }
 
@@ -344,11 +361,13 @@ export class PhaseScene extends Scene {
         const ui = this.add.graphics().setDepth(30).setScrollFactor(0);
         ui.fillStyle(0x10212b, 0.75).fillRoundedRect(24, 22, 320, 74, 6);
         ui.lineStyle(2, 0xb8cc84, 0.55).strokeRoundedRect(24, 22, 320, 74, 6);
+        this.hudObjects.push(ui);
 
-        this.add
+        const nameText = this.add
             .text(43, 45, this.phase.name, { fontFamily: 'Georgia, serif', fontSize: '20px', color: '#f7e7b0' })
             .setDepth(31)
             .setScrollFactor(0);
+        this.hudObjects.push(nameText);
 
         this.hpText = this.add
             .text(300, 50, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ff6b6b' })
@@ -356,13 +375,15 @@ export class PhaseScene extends Scene {
             .setDepth(31)
             .setScrollFactor(0);
         this.lastHp = -1;
+        this.hudObjects.push(this.hpText);
 
-        this.add
+        const subtitleText = this.add
             .text(43, 72, this.phase.subtitle, { fontFamily: 'monospace', fontSize: '11px', color: '#9db68d' })
             .setDepth(31)
             .setScrollFactor(0);
+        this.hudObjects.push(subtitleText);
 
-        this.add
+        const controlsText = this.add
             .text(980, 30, 'A/D mover  ·  W pular  ·  F atacar', {
                 fontFamily: 'monospace',
                 fontSize: '11px',
@@ -371,6 +392,7 @@ export class PhaseScene extends Scene {
             .setOrigin(1, 0)
             .setDepth(31)
             .setScrollFactor(0);
+        this.hudObjects.push(controlsText);
     }
 
     private createMapOverlay() {
@@ -417,6 +439,49 @@ export class PhaseScene extends Scene {
 
         this.mapOverlay = this.add.container(0, 0, children).setDepth(100).setScrollFactor(0).setVisible(false);
         this.updateMapMarker();
+    }
+
+    // Reflexo "de verdade" do lago: uma segunda câmera olhando pra mesma cena
+    // ao vivo (cenário, jogador, inimigos), espelhada verticalmente, desenhada
+    // por cima da base d'água (ver drawWaterBase em phases.ts). Não é uma
+    // imagem congelada — é o jogo rodando duas vezes.
+    private setupLakeReflection() {
+        const viewportY = FOREST_WATER_TOP_Y;
+        const viewportHeight = HEIGHT - FOREST_WATER_TOP_Y;
+
+        // Quanto de cenário (em px de mundo, medidos a partir do GROUND_Y pra
+        // cima) cabe "amassado" dentro da faixa fina de água. Cobre a árvore/
+        // casa inteira (450px, ver treesHeight em phases.ts) e ainda pega uma
+        // fatia da montanha, em vez de só o pé do tronco.
+        const reflectedWorldHeight = 550;
+
+        const cam = this.cameras.add(0, viewportY, this.scale.width, viewportHeight);
+        cam.setName('lake-reflection');
+
+        // zoomX = 1: mesma largura de mundo que a câmera principal mostra (o
+        // reflexo bate exatamente com o que está visível em cima, sem sobrar
+        // nem faltar dos lados). zoomY negativo e bem menor que 1: espelha E
+        // "afasta" a vertical, encolhendo os 550px de cenário pra caber nos
+        // poucos pixels de faixa d'água disponíveis — senão só a base das
+        // árvores aparecia, cortada.
+        cam.setZoom(1, -viewportHeight / reflectedWorldHeight);
+        cam.setAlpha(0.55);
+
+        // scrollY: 654 (GROUND_Y) faz o mundo em y=GROUND_Y aparecer no topo
+        // do viewport (a "linha d'água") e o mundo em
+        // y=GROUND_Y-reflectedWorldHeight aparecer no fundo — ou seja, reflete
+        // a faixa de cenário logo acima do chão, e não o próprio chão/água
+        // (que ficam abaixo de GROUND_Y e nunca entram nessa janela). Esse
+        // valor não depende do zoom, só do ponto que deve ficar na borda
+        // superior do reflexo.
+        cam.scrollY = GROUND_Y;
+
+        // HUD e mapa são fixos na tela (scrollFactor 0); sem isso eles
+        // vazariam, minúsculos, dentro da janela de reflexo.
+        cam.ignore(this.hudObjects);
+        cam.ignore(this.mapOverlay);
+
+        this.reflectionCam = cam;
     }
 
     private updateMapMarker() {

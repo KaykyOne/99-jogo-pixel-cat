@@ -18,6 +18,11 @@ const config: Types.Core.GameConfig = {
     parent: 'game-container',
     backgroundColor: '#028af8',
     scale: {
+        // FIT: nunca corta nada, só sobra barra preta fina quando a janela
+        // não é exatamente 4:3 (1024x768). ENVELOP foi testado e cortava
+        // demais (HUD e cenário) em janelas widescreen — como todo o layout
+        // do jogo usa posições fixas pensadas pra essa resolução, não dá pra
+        // preencher a janela inteira sem cortar ou distorcer algo.
         mode: Scale.FIT,
         autoCenter: Scale.CENTER_BOTH
     },
