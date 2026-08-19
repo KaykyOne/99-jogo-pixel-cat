@@ -11,6 +11,7 @@ export default defineConfig({
             }
         },
     },
+    base: '/jogo-99-freelas/',
     server: {
         port: 8080
     }

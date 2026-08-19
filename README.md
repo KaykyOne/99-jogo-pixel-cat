@@ -18,6 +18,17 @@ This template has been updated for:
 
 [Node.js](https://nodejs.org) is required to install dependencies and run scripts via `npm`.
 
+## Docker
+
+To build and run the production version without installing Node.js locally:
+
+```bash
+docker compose up --build
+```
+
+The game will be available at `http://localhost:8080`. To stop the container, run
+`docker compose down`.
+
 ## Available Commands
 
 | Command | Description |

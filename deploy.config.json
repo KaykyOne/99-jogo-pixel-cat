@@ -1,0 +1,42 @@
+{
+  "name": "jogo-99-freelas",
+  "host": "80.190.77.26",
+  "user": "kayky",
+  "port": 22,
+  "privateKey": "~/.ssh/id_rsa",
+
+  "localPath": ".",
+  "remotePath": "/opt/apps/jogo-99-freelas",
+
+  "runtime": "docker",
+
+  "ignore": [
+    "node_modules",
+    ".git",
+    "dist"
+  ],
+
+  "commands": {
+    "build": []
+  },
+
+  "docker": {
+    "projectName": "jogo-99-freelas",
+    "composeFile": "docker-compose.yml",
+    "build": true
+  },
+
+  "health": {
+    "url": "http://127.0.0.1:3001/",
+    "timeout": 30000,
+    "interval": 2000
+  },
+
+  "sharedFiles": [
+    ".env"
+  ],
+
+  "releases": {
+    "keep": 5
+  }
+}

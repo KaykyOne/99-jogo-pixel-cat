@@ -1,5 +1,7 @@
 import { GameObjects, Input, Physics, Scene } from 'phaser';
 
+import { MeleeHitbox } from '../combat/MeleeHitbox';
+import { DamageSource } from '../damage/damage';
 import { Enemy, EnemyType } from '../entities/Enemy';
 import { Player } from '../entities/Player';
 import { GROUND_Y, HEIGHT, PHASES, PHASE_WIDTH, PhaseDefinition } from '../world/phases';
@@ -27,6 +29,8 @@ export class PhaseScene extends Scene {
     private mapOverlay!: GameObjects.Container;
     private mapMarker!: GameObjects.Arc;
     private mapLocationText!: GameObjects.Text;
+    private hpText!: GameObjects.Text;
+    private lastHp = -1;
 
     constructor(phase: PhaseDefinition, phaseIndex: number) {
         super(phase.key);
@@ -51,7 +55,6 @@ export class PhaseScene extends Scene {
 
         this.player = new Player(this, spawnX, GROUND_Y - 80);
         this.player.setDepth(20);
-        this.player.on('attack', this.handlePlayerAttack, this);
 
         const colliders = Array.from(this.physics.world.staticBodies);
 
@@ -64,8 +67,13 @@ export class PhaseScene extends Scene {
 
         for (const enemy of this.enemies) {
             this.physics.add.collider(enemy, colliders);
-            this.physics.add.collider(this.player, enemy);
+            this.physics.add.collider(this.player, enemy, () => {
+                this.handleContactDamage(enemy);
+            });
         }
+
+        // Reinicia a fase quando o jogador morre.
+        this.player.once('player-died', () => this.handlePlayerDeath());
 
         this.buildPortals();
         this.createHud();
@@ -78,7 +86,23 @@ export class PhaseScene extends Scene {
     }
 
     update(time: number, delta: number) {
-        this.player.update();
+        this.player.update(time, delta);
+        this.refreshHudHp();
+
+        // Verifica, a cada frame, o overlap entre a hitbox ativa do golpe e os
+        // inimigos. A hitbox só existe durante os frames de impacto da animação.
+        const activeHitbox = this.player.combat.activeHitboxGameObject;
+        if (activeHitbox) {
+            for (const enemy of this.enemies) {
+                if (!enemy.active) {
+                    continue;
+                }
+
+                this.physics.world.overlap(activeHitbox, enemy, () => {
+                    this.handleImpact(activeHitbox, enemy);
+                });
+            }
+        }
 
         for (const enemy of this.enemies) {
             enemy.update(time, delta);
@@ -140,24 +164,70 @@ export class PhaseScene extends Scene {
         }
     }
 
-    private handlePlayerAttack() {
-        const direction = this.player.flipX ? -1 : 1;
-        const attackReach = 155;
-
-        for (const enemy of this.enemies) {
-            if (!enemy.active) {
-                continue;
-            }
-
-            const horizontalDistance = enemy.x - this.player.x;
-            const isInFront = horizontalDistance * direction > -20;
-            const isInRange = Math.abs(horizontalDistance) <= attackReach;
-            const isAtSameHeight = Math.abs(enemy.y - this.player.y) < 75;
-
-            if (isInFront && isInRange && isAtSameHeight) {
-                enemy.takeHit(direction);
-            }
+    // Resolve um impacto de golpe: garante que cada inimigo só recebe o golpe uma
+    // vez e coordena dano, knockback e os efeitos de game feel (hit-stop e shake).
+    private handleImpact(hitbox: MeleeHitbox, enemy: Enemy) {
+        const attack = this.player.combat.activeAttackDefinition;
+        if (!attack) {
+            return;
         }
+
+        if (this.player.combat.hasTargetBeenHit(enemy)) {
+            return;
+        }
+
+        // Converte a definição do ataque numa fonte de dano para o sistema de
+        // Health, preservando o comportamento anterior de dano e knockback.
+        const source: DamageSource = {
+            amount: attack.damage,
+            kind: 'physical',
+            knockbackX: attack.knockbackX,
+            knockbackY: attack.knockbackY
+        };
+
+        const applied = enemy.takeHit(source, hitbox.hitDirection);
+        if (applied <= 0) {
+            return;
+        }
+
+        this.player.combat.markTargetHit(enemy);
+
+        // Hit-stop breve: congela a simulação para dar peso ao impacto.
+        this.physics.world.pause();
+        this.time.delayedCall(50, () => this.physics.world.resume());
+
+        this.cameras.main.shake(90, 0.004);
+    }
+
+    // Dano por contato: o jogador recebe o dano do inimigo ao encostar nele.
+    private handleContactDamage(enemy: Enemy) {
+        if (!enemy.isAlive) {
+            return;
+        }
+
+        const direction = this.player.x >= enemy.x ? 1 : -1;
+        this.player.takeDamage(enemy.contactDamage, direction);
+    }
+
+    // Reinicia a fase após a morte do jogador, com um breve fade-out.
+    private handlePlayerDeath() {
+        this.cameras.main.fadeOut(420, 0, 0, 0, () => {
+            this.scene.restart({ spawnX: PHASE_WIDTH / 2 });
+        });
+    }
+
+    private refreshHudHp() {
+        const hp = this.player.currentHp;
+        if (hp === this.lastHp) {
+            return;
+        }
+
+        this.lastHp = hp;
+        this.hpText.setText(this.heartString(hp, this.player.maxHp));
+    }
+
+    private heartString(current: number, max: number): string {
+        return '♥'.repeat(current) + '♡'.repeat(Math.max(0, max - current));
     }
 
     private buildPhysics() {
@@ -277,6 +347,13 @@ export class PhaseScene extends Scene {
             .text(43, 45, this.phase.name, { fontFamily: 'Georgia, serif', fontSize: '20px', color: '#f7e7b0' })
             .setDepth(31)
             .setScrollFactor(0);
+
+        this.hpText = this.add
+            .text(300, 50, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ff6b6b' })
+            .setOrigin(1, 0)
+            .setDepth(31)
+            .setScrollFactor(0);
+        this.lastHp = -1;
 
         this.add
             .text(43, 72, this.phase.subtitle, { fontFamily: 'monospace', fontSize: '11px', color: '#9db68d' })
