@@ -4,26 +4,31 @@ import { Difficulty, loadSave, writeSave } from '../state/save';
 import { PHASES } from '../world/phases';
 
 const MENU_WIDTH = 1024;
-const MENU_HEIGHT = 768;
 
 export class MenuScene extends Scene {
     private mainPanel!: GameObjects.Container;
     private difficultyPanel!: GameObjects.Container;
+    private background!: GameObjects.Rectangle;
+    private content!: GameObjects.Container;
 
     constructor() {
         super('Menu');
     }
 
     create() {
-        this.add.rectangle(0, 0, MENU_WIDTH, MENU_HEIGHT, 0x08111d, 0.94).setOrigin(0);
-        this.add
+        this.background = this.add
+            .rectangle(0, 0, this.scale.width, this.scale.height, 0x08111d, 0.94)
+            .setOrigin(0);
+        this.content = this.add.container(this.menuOffsetX, 0);
+
+        const title = this.add
             .text(MENU_WIDTH / 2, 170, 'JOGO 99', {
                 fontFamily: 'Georgia, serif',
                 fontSize: '48px',
                 color: '#f7e7b0'
             })
             .setOrigin(0.5);
-        this.add
+        const subtitle = this.add
             .text(MENU_WIDTH / 2, 230, 'A jornada entre os mundos', {
                 fontFamily: 'monospace',
                 fontSize: '15px',
@@ -36,6 +41,13 @@ export class MenuScene extends Scene {
 
         this.createMainOptions();
         this.createDifficultyOptions();
+        this.content.add([title, subtitle, this.mainPanel, this.difficultyPanel]);
+
+        this.scale.off('resize', this.repositionLayout, this);
+        this.scale.on('resize', this.repositionLayout, this);
+        this.events.once('shutdown', () => {
+            this.scale.off('resize', this.repositionLayout, this);
+        });
     }
 
     private createMainOptions() {
@@ -136,5 +148,14 @@ export class MenuScene extends Scene {
         this.registry.set('difficulty', difficulty);
         writeSave({ phaseIndex: 0, difficulty });
         this.scene.start(PHASES[0].key, { spawnX: 200 });
+    }
+
+    private get menuOffsetX(): number {
+        return (this.scale.width - MENU_WIDTH) / 2;
+    }
+
+    private repositionLayout() {
+        this.background.setSize(this.scale.width, this.scale.height);
+        this.content.x = this.menuOffsetX;
     }
 }

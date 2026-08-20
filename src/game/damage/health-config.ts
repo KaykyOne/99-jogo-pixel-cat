@@ -103,3 +103,32 @@ const ENEMY_STATS_TABLE = {
 
 export const ENEMY_STATS = ENEMY_STATS_TABLE;
 export type EnemyType = keyof typeof ENEMY_STATS_TABLE;
+
+// Variantes de boss: reutilizam arte e corpo dos inimigos comuns, mas com
+// vida e comportamento de combate próprios.
+export const BOSS_STATS: Record<EnemyType, typeof ENEMY_STATS[EnemyType]> = {
+    graverobber: {
+        ...ENEMY_STATS.graverobber,
+        hp: 40,
+        defense: 1,
+        combat: {
+            ...ENEMY_STATS.graverobber.combat,
+            amount: 2,
+            aggroRange: 420,
+            attackRange: 70,
+            cooldownMs: 650
+        }
+    },
+    steamman: {
+        ...ENEMY_STATS.steamman,
+        hp: 60,
+        defense: 2,
+        combat: {
+            ...ENEMY_STATS.steamman.combat,
+            amount: 3,
+            aggroRange: 380,
+            attackRange: 75,
+            cooldownMs: 900
+        }
+    }
+};

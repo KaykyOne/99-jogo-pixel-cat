@@ -13,3 +13,9 @@ body {
     justify-content: center;
     align-items: center;
 }
+
+#game-container {
+    width: 100vw;
+    height: 768px;
+    max-height: 100vh;
+}

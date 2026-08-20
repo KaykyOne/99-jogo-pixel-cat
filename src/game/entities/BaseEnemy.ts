@@ -38,17 +38,25 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
     // hitboxes/contatos resolvidos no mesmo tick).
     private lastDamageFrame = -1;
 
-    protected constructor(scene: Scene, x: number, y: number, typeKey: EnemyType, target: Player) {
+    protected constructor(
+        scene: Scene,
+        x: number,
+        y: number,
+        typeKey: EnemyType,
+        target: Player,
+        stats: EnemyTypeStats = ENEMY_STATS[typeKey],
+        scale = 3
+    ) {
         super(scene, x, y, `${typeKey}-idle`, 0);
 
         this.typeKey = typeKey;
-        this.stats = ENEMY_STATS[typeKey];
+        this.stats = stats;
         this.target = target;
 
         scene.add.existing(this);
         scene.physics.add.existing(this);
 
-        this.setScale(3);
+        this.setScale(scale);
 
         this.health = new Health(this.stats.hp, { defense: this.stats.defense, resistance: this.stats.resistance });
 

@@ -4,6 +4,7 @@ import { MeleeHitbox } from '../combat/MeleeHitbox';
 import { DamageSource } from '../damage/damage';
 import { EnemyType } from '../damage/health-config';
 import { BaseEnemy } from '../entities/BaseEnemy';
+import { Boss } from '../entities/Boss';
 import { createEnemy } from '../entities/enemy-factory';
 import { Player } from '../entities/Player';
 import { clearSave, Difficulty, writeSave } from '../state/save';
@@ -38,6 +39,12 @@ export class PhaseScene extends Scene {
     private hpText!: GameObjects.Text;
     private lastHp = -1;
     private dashIndicator!: GameObjects.Arc;
+    private controlsText!: GameObjects.Text;
+    private mapPanel!: GameObjects.Graphics;
+    private mapRoute!: GameObjects.Graphics;
+    private mapTitle!: GameObjects.Text;
+    private mapHint!: GameObjects.Text;
+    private mapPhaseNodes: { node: GameObjects.Arc; label: GameObjects.Text }[] = [];
 
     // Câmera do reflexo do lago (só existe na fase 'forest', ver
     // setupLakeReflection). Precisa ignorar HUD/mapa, por isso os elementos
@@ -62,6 +69,7 @@ export class PhaseScene extends Scene {
         this.teleporting = false;
         this.phaseCleared = false;
         this.lastHp = -1;
+        this.mapPhaseNodes = [];
 
         const difficulty = (this.registry.get('difficulty') as Difficulty) ?? 'normal';
         writeSave({ phaseIndex: this.phaseIndex, difficulty });
@@ -90,6 +98,7 @@ export class PhaseScene extends Scene {
         this.physics.add.collider(this.player, colliders);
 
         this.spawnEnemies();
+        this.spawnBoss();
 
         for (const enemy of this.enemies) {
             this.physics.add.collider(enemy, colliders);
@@ -118,6 +127,15 @@ export class PhaseScene extends Scene {
         if (this.phase.key === 'forest') {
             this.setupLakeReflection();
         }
+
+        // A escala pode mudar enquanto a cena continua ativa. Remove antes de
+        // registrar porque scene.restart reutiliza esta mesma instância.
+        this.scale.off('resize', this.repositionResponsiveUI, this);
+        this.scale.on('resize', this.repositionResponsiveUI, this);
+        this.events.once('shutdown', () => {
+            this.scale.off('resize', this.repositionResponsiveUI, this);
+            this.scale.off('resize', this.resizeLakeReflection, this);
+        });
     }
 
     update(time: number, delta: number) {
@@ -214,6 +232,31 @@ export class PhaseScene extends Scene {
 
             this.enemies.push(enemy);
         }
+    }
+
+    private spawnBoss() {
+        const bossByPhase: Record<string, EnemyType> = {
+            forest: 'graverobber',
+            desert: 'steamman',
+            snow: 'graverobber',
+            cave: 'steamman',
+            volcano: 'steamman',
+            ruins: 'graverobber'
+        };
+
+        const type = bossByPhase[this.phase.key];
+        if (!type) {
+            return;
+        }
+
+        const bossX = PHASE_WIDTH - 420;
+        // O boss usa escala 5 (em vez de 3 dos inimigos comuns). Ajusta o
+        // centro inicial para que o corpo ampliado comece apoiado no chão,
+        // sem nascer enterrado nele.
+        const boss = new Boss(this, bossX, GROUND_Y - 120, type, this.player);
+        boss.setDepth(15);
+        boss.setPatrolRange(bossX - 100, bossX + 100);
+        this.enemies.push(boss);
     }
 
     // Resolve um impacto de golpe: garante que cada inimigo só recebe o golpe uma
@@ -426,8 +469,8 @@ export class PhaseScene extends Scene {
             .setScrollFactor(0);
         this.hudObjects.push(subtitleText);
 
-        const controlsText = this.add
-            .text(980, 30, 'A/D mover  ·  W pular  ·  F atacar  ·  Espaço dash', {
+        this.controlsText = this.add
+            .text(this.scale.width - 44, 30, 'A/D mover  ·  W pular  ·  F atacar  ·  Espaço dash', {
                 fontFamily: 'monospace',
                 fontSize: '11px',
                 color: '#c0d9b1'
@@ -435,7 +478,7 @@ export class PhaseScene extends Scene {
             .setOrigin(1, 0)
             .setDepth(31)
             .setScrollFactor(0);
-        this.hudObjects.push(controlsText);
+        this.hudObjects.push(this.controlsText);
 
         this.dashIndicator = this.add
             .circle(this.player.x, this.player.y - 60, 6, 0x4ade80)
@@ -453,46 +496,40 @@ export class PhaseScene extends Scene {
     private createMapOverlay() {
         this.mapKey = this.input.keyboard!.addKey(Input.Keyboard.KeyCodes.M);
 
-        const panel = this.add.graphics();
-        panel.fillStyle(0x08111d, 0.94).fillRoundedRect(112, 118, 800, 532, 14);
-        panel.lineStyle(2, 0xb8cc84, 0.85).strokeRoundedRect(112, 118, 800, 532, 14);
+        this.mapPanel = this.add.graphics();
 
-        const title = this.add
-            .text(512, 154, 'MAPA DO MUNDO', { fontFamily: 'Georgia, serif', fontSize: '30px', color: '#f7e7b0' })
+        this.mapTitle = this.add
+            .text(0, 154, 'MAPA DO MUNDO', { fontFamily: 'Georgia, serif', fontSize: '30px', color: '#f7e7b0' })
             .setOrigin(0.5);
-        const hint = this.add
-            .text(512, 194, 'Pressione M para fechar', { fontFamily: 'monospace', fontSize: '13px', color: '#b9cbb1' })
+        this.mapHint = this.add
+            .text(0, 194, 'Pressione M para fechar', { fontFamily: 'monospace', fontSize: '13px', color: '#b9cbb1' })
             .setOrigin(0.5);
 
-        const route = this.add.graphics();
-        const mapStartX = 188;
-        const mapEndX = 836;
+        this.mapRoute = this.add.graphics();
         const mapY = 365;
-        const segmentWidth = (mapEndX - mapStartX) / (PHASES.length - 1);
-        route.lineStyle(8, 0x3e5266, 1).lineBetween(mapStartX, mapY, mapEndX, mapY);
-        route.lineStyle(2, 0xc8d897, 0.72).lineBetween(mapStartX, mapY, mapEndX, mapY);
 
-        const children: GameObjects.GameObject[] = [panel, title, hint, route];
+        const children: GameObjects.GameObject[] = [this.mapPanel, this.mapTitle, this.mapHint, this.mapRoute];
         PHASES.forEach((phase, index) => {
-            const x = mapStartX + segmentWidth * index;
             const active = index === this.phaseIndex;
-            const node = this.add.circle(x, mapY, active ? 16 : 12, active ? 0xf7e7b0 : 0x6f8b71);
+            const node = this.add.circle(0, mapY, active ? 16 : 12, active ? 0xf7e7b0 : 0x6f8b71);
             const label = this.add
-                .text(x, mapY + 39, phase.name, {
+                .text(0, mapY + 39, phase.name, {
                     fontFamily: 'monospace', fontSize: '10px', color: active ? '#f7e7b0' : '#b9cbb1',
                     align: 'center', wordWrap: { width: 100 }
                 })
                 .setOrigin(0.5, 0);
+            this.mapPhaseNodes.push({ node, label });
             children.push(node, label);
         });
 
-        this.mapMarker = this.add.circle(mapStartX, mapY, 8, 0xff6b4a).setStrokeStyle(3, 0xfff2c2);
+        this.mapMarker = this.add.circle(0, mapY, 8, 0xff6b4a).setStrokeStyle(3, 0xfff2c2);
         this.mapLocationText = this.add
-            .text(512, 535, '', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' })
+            .text(0, 535, '', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' })
             .setOrigin(0.5);
         children.push(this.mapMarker, this.mapLocationText);
 
         this.mapOverlay = this.add.container(0, 0, children).setDepth(100).setScrollFactor(0).setVisible(false);
+        this.repositionResponsiveUI();
         this.updateMapMarker();
     }
 
@@ -508,7 +545,7 @@ export class PhaseScene extends Scene {
         // cima) cabe "amassado" dentro da faixa fina de água. Cobre a árvore/
         // casa inteira (450px, ver treesHeight em phases.ts) e ainda pega uma
         // fatia da montanha, em vez de só o pé do tronco.
-        const reflectedWorldHeight = 550;
+        const reflectedWorldHeight = 380;
 
         const cam = this.cameras.add(0, viewportY, this.scale.width, viewportHeight);
         cam.setName('lake-reflection');
@@ -520,7 +557,7 @@ export class PhaseScene extends Scene {
         // poucos pixels de faixa d'água disponíveis — senão só a base das
         // árvores aparecia, cortada.
         cam.setZoom(1, -viewportHeight / reflectedWorldHeight);
-        cam.setAlpha(0.55);
+        cam.setAlpha(0.96);
 
         // scrollY: 654 (GROUND_Y) faz o mundo em y=GROUND_Y aparecer no topo
         // do viewport (a "linha d'água") e o mundo em
@@ -537,11 +574,54 @@ export class PhaseScene extends Scene {
         cam.ignore(this.mapOverlay);
 
         this.reflectionCam = cam;
+        this.resizeLakeReflection();
+        this.scale.off('resize', this.resizeLakeReflection, this);
+        this.scale.on('resize', this.resizeLakeReflection, this);
+    }
+
+    private resizeLakeReflection() {
+        if (!this.reflectionCam) {
+            return;
+        }
+
+        this.reflectionCam.setSize(this.scale.width, HEIGHT - FOREST_WATER_TOP_Y);
+    }
+
+    private repositionResponsiveUI() {
+        this.controlsText.x = this.scale.width - 44;
+
+        const centerX = this.scale.width / 2;
+        const panelX = centerX - 400;
+        const mapStartX = centerX - 324;
+        const mapEndX = centerX + 324;
+        const mapY = 365;
+        const segmentWidth = (mapEndX - mapStartX) / (PHASES.length - 1);
+
+        this.mapPanel.clear();
+        this.mapPanel.fillStyle(0x08111d, 0.94).fillRoundedRect(panelX, 118, 800, 532, 14);
+        this.mapPanel.lineStyle(2, 0xb8cc84, 0.85).strokeRoundedRect(panelX, 118, 800, 532, 14);
+
+        this.mapRoute.clear();
+        this.mapRoute.lineStyle(8, 0x3e5266, 1).lineBetween(mapStartX, mapY, mapEndX, mapY);
+        this.mapRoute.lineStyle(2, 0xc8d897, 0.72).lineBetween(mapStartX, mapY, mapEndX, mapY);
+
+        this.mapTitle.x = centerX;
+        this.mapHint.x = centerX;
+        this.mapLocationText.x = centerX;
+
+        this.mapPhaseNodes.forEach(({ node, label }, index) => {
+            const x = mapStartX + segmentWidth * index;
+            node.x = x;
+            label.x = x;
+        });
+
+        this.updateMapMarker();
     }
 
     private updateMapMarker() {
-        const mapStartX = 188;
-        const mapEndX = 836;
+        const centerX = this.scale.width / 2;
+        const mapStartX = centerX - 324;
+        const mapEndX = centerX + 324;
         const phaseProgress = Math.max(0, Math.min(1, this.player.x / PHASE_WIDTH));
         const worldProgress = (this.phaseIndex + phaseProgress) / (PHASES.length - 1);
 
