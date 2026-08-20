@@ -58,4 +58,17 @@ export function createPlayerAnimations(scene: Scene) {
 
         repeat: -1
     });
+
+    scene.anims.create({
+        key: 'player-run',
+
+        frames: scene.anims.generateFrameNumbers('player-run', {
+            start: 0,
+            end: 5
+        }),
+
+        frameRate: 14,
+
+        repeat: -1
+    });
 }

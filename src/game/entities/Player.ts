@@ -5,10 +5,12 @@ import { DamageSource } from '../damage/damage';
 import { Health } from '../damage/Health';
 import { PLAYER_HEALTH } from '../damage/health-config';
 import { PLAYER_BODY, PLAYER_MOVEMENT } from './player-config';
+import { PlayerDash } from './PlayerDash';
 import { syncFacingOffset } from './physics-utils';
 
 type PlayerKeys = {
     attack: Input.Keyboard.Key;
+    dash: Input.Keyboard.Key;
     right: Input.Keyboard.Key;
     left: Input.Keyboard.Key;
     up: Input.Keyboard.Key;
@@ -21,6 +23,7 @@ export class Player extends Physics.Arcade.Sprite {
     // Componente de combate. Mantido público para que a cena configure o
     // overlap da hitbox ativa e leia o resultado dos impactos.
     readonly combat: PlayerCombat;
+    readonly dash: PlayerDash;
 
     private keys: PlayerKeys;
 
@@ -63,9 +66,11 @@ export class Player extends Physics.Arcade.Sprite {
         this.setCollideWorldBounds(true);
 
         this.combat = new PlayerCombat(scene, this);
+        this.dash = new PlayerDash(scene, this);
 
         this.keys = scene.input.keyboard!.addKeys({
             attack: Input.Keyboard.KeyCodes.F,
+            dash: Input.Keyboard.KeyCodes.SPACE,
 
             right: Input.Keyboard.KeyCodes.D,
             left: Input.Keyboard.KeyCodes.A,
@@ -107,16 +112,27 @@ export class Player extends Physics.Arcade.Sprite {
         const onGround = this.arcadeBody.blocked.down;
 
         this.updateTimers(delta, onGround);
+        this.dash.update(time);
         this.combat.update(this.currentAnimFrameIndex);
 
         // Durante o hitstun o jogador não pode atacar nem pular; apenas sofre o
         // recuo do knockback.
-        if (this.hurtTimer <= 0) {
+        if (this.hurtTimer <= 0 && !this.combat.isAttacking) {
+            // O dash é permitido no ar. Um ataque já iniciado não é
+            // interrompido, preservando o ciclo da hitbox de combate.
+            if (Input.Keyboard.JustDown(this.keys.dash)) {
+                this.dash.attemptDash(time, this.flipX ? -1 : 1);
+            }
+        }
+
+        if (this.hurtTimer <= 0 && !this.dash.isDashing) {
             this.handleAttack(time, onGround);
             this.handleJumpQueue();
         }
 
-        if (this.combat.isAttacking) {
+        if (this.dash.isDashing) {
+            // PlayerDash controla a velocidade horizontal durante o impulso.
+        } else if (this.combat.isAttacking) {
             // O golpe interrompe o deslocamento horizontal durante a animação.
             this.setVelocityX(0);
         } else if (this.hurtTimer > 0) {
@@ -132,7 +148,9 @@ export class Player extends Physics.Arcade.Sprite {
             this.applyHorizontalMovement(moveX, onGround, dt);
         }
 
-        this.applyVerticalMovement(dt);
+        if (!this.dash.isDashing) {
+            this.applyVerticalMovement(dt);
+        }
         this.updateAnimation(onGround);
 
         // O corpo físico não acompanha flipX sozinho (ver physics-utils);
@@ -319,7 +337,7 @@ export class Player extends Physics.Arcade.Sprite {
 
     // Lógica de animação: só decide qual animação tocar com base no estado.
     private updateAnimation(onGround: boolean) {
-        if (this.combat.isAttacking) {
+        if (this.dash.isDashing || this.combat.isAttacking) {
             return;
         }
 

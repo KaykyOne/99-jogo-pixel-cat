@@ -33,3 +33,11 @@ export const PLAYER_MOVEMENT = {
     coyoteTime: 110,
     jumpBufferTime: 130
 } as const;
+
+// O dash mantém uma trajetória reta, inclusive quando iniciado no ar.
+export const PLAYER_DASH = {
+    speed: 780,
+    durationMs: 200,
+    cooldownMs: 2000,
+    freezeGravityDuringDash: true
+} as const;

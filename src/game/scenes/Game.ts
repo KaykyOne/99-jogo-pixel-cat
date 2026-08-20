@@ -33,6 +33,7 @@ export class PhaseScene extends Scene {
     private mapLocationText!: GameObjects.Text;
     private hpText!: GameObjects.Text;
     private lastHp = -1;
+    private dashIndicator!: GameObjects.Arc;
 
     // Câmera do reflexo do lago (só existe na fase 'forest', ver
     // setupLakeReflection). Precisa ignorar HUD/mapa, por isso os elementos
@@ -75,9 +76,14 @@ export class PhaseScene extends Scene {
 
         for (const enemy of this.enemies) {
             this.physics.add.collider(enemy, colliders);
-            this.physics.add.collider(this.player, enemy, () => {
-                this.handleContactDamage(enemy);
-            });
+            this.physics.add.collider(
+                this.player,
+                enemy,
+                () => this.handleContactDamage(enemy),
+                // false evita dano e separação física durante o dash.
+                () => !this.player.dash.isDashing,
+                this
+            );
         }
 
         // Reinicia a fase quando o jogador morre.
@@ -100,6 +106,7 @@ export class PhaseScene extends Scene {
     update(time: number, delta: number) {
         this.player.update(time, delta);
         this.refreshHudHp();
+        this.updateDashIndicator();
 
         // Verifica, a cada frame, o overlap entre a hitbox ativa do golpe e os
         // inimigos. A hitbox só existe durante os frames de impacto da animação.
@@ -384,7 +391,7 @@ export class PhaseScene extends Scene {
         this.hudObjects.push(subtitleText);
 
         const controlsText = this.add
-            .text(980, 30, 'A/D mover  ·  W pular  ·  F atacar', {
+            .text(980, 30, 'A/D mover  ·  W pular  ·  F atacar  ·  Espaço dash', {
                 fontFamily: 'monospace',
                 fontSize: '11px',
                 color: '#c0d9b1'
@@ -393,6 +400,18 @@ export class PhaseScene extends Scene {
             .setDepth(31)
             .setScrollFactor(0);
         this.hudObjects.push(controlsText);
+
+        this.dashIndicator = this.add
+            .circle(this.player.x, this.player.y - 60, 6, 0x4ade80)
+            .setDepth(21)
+            .setStrokeStyle(2, 0xffffff, 0.6);
+    }
+
+    private updateDashIndicator() {
+        this.dashIndicator.setPosition(this.player.x, this.player.y - 60);
+        this.dashIndicator.setFillStyle(
+            this.player.dash.readiness === 'ready' ? 0x4ade80 : 0xfbbf24
+        );
     }
 
     private createMapOverlay() {

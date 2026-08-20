@@ -27,6 +27,7 @@ export class PreloadScene extends Scene {
         this.load.spritesheet('player-jump', 'player/jump.png', { frameWidth: 48, frameHeight: 48 });
         this.load.spritesheet('player-idle', 'player/idle.png', { frameWidth: 48, frameHeight: 48 });
         this.load.spritesheet('player-walk', 'player/walk.png', { frameWidth: 48, frameHeight: 48 });
+        this.load.spritesheet('player-run', 'player/run.png', { frameWidth: 48, frameHeight: 48 });
 
         // 3 variantes de golpe (sorteadas a cada ataque, ver attack-variants.ts).
         this.load.spritesheet('player-attack-1', 'player/Woodcutter_attack1.png', { frameWidth: 48, frameHeight: 48 });
