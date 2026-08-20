@@ -1,14 +1,22 @@
 import { GameObjects, Scene } from 'phaser';
 
 export const HEIGHT = 768;
-export const GROUND_Y = 654;
+export const GROUND_Y = HEIGHT / 2;
 export const PHASE_WIDTH = 2560;
 
+// As fases não-floresta foram desenhadas originalmente com o chão em 654.
+// Somente posições Y absolutas do céu são reescaladas; tamanhos permanecem.
+const LEGACY_GROUND_Y = 654;
+const V_SCALE = GROUND_Y / LEGACY_GROUND_Y;
+
+function scaleY(y: number): number {
+    return y * V_SCALE;
+}
+
 // Linha d'água do lago da floresta: só a faixa abaixo dela vira reflexo de
-// câmera (ver PhaseScene.setupLakeReflection em Game.ts). Fica abaixo do
-// GROUND_Y pra sobrar uma tira de grama/terra visível entre o chão andável e
-// a água.
-export const FOREST_WATER_TOP_Y = GROUND_Y + 15;
+// câmera (ver PhaseScene.setupLakeReflection em Game.ts). Mantém uma margem
+// inteira de 40 px do próprio terreno entre o chão andável e a água.
+export const FOREST_WATER_TOP_Y = GROUND_Y + 40;
 
 export type PhaseDefinition = {
     key: string;
@@ -66,23 +74,22 @@ function drawCactus(g: GameObjects.Graphics, x: number, baseY: number, h: number
 }
 
 function sunsetStripes(g: GameObjects.Graphics, x0: number, stops: [number, number][]) {
-    let prev = 654;
+    let prev = GROUND_Y;
     for (const [bottom, color] of stops) {
         g.fillStyle(color).fillRect(x0, bottom, PHASE_WIDTH, prev - bottom);
         prev = bottom;
     }
 }
 
-// Base de segurança quase invisível da água. O reflexo ao vivo é a camada
-// visual principal; este tom só evita um vão de um frame no redimensionamento.
+// A base azul dá o tom da água por trás do reflexo espelhado.
 function drawWaterBase(scene: Scene, x0: number) {
     scene.add
-        .rectangle(x0, FOREST_WATER_TOP_Y, PHASE_WIDTH, HEIGHT - FOREST_WATER_TOP_Y, 0x123449, 0.35)
+        .rectangle(x0, FOREST_WATER_TOP_Y, PHASE_WIDTH, HEIGHT - FOREST_WATER_TOP_Y, 0x2972a4)
         .setOrigin(0, 0)
         .setDepth(0.5);
 
     scene.add
-        .tileSprite(x0, FOREST_WATER_TOP_Y - 8, PHASE_WIDTH, 16, 'forest-water-edge')
+        .tileSprite(x0, FOREST_WATER_TOP_Y, PHASE_WIDTH, 16, 'forest-water-edge')
         .setOrigin(0, 0)
         .setTileScale(16 / 207, 16 / 207)
         .setDepth(0.6);
@@ -162,13 +169,15 @@ export const PHASES: PhaseDefinition[] = [
 
             // Chão: acompanha o jogo 1:1 (scrollFactor 1), alinhado com o corpo
             // físico invisível criado em Game.buildPhysics (mesmo GROUND_Y).
-            const groundHeight = HEIGHT - GROUND_Y + 20;
-            const groundScale = groundHeight / 359;
+            // A faixa foi preparada com 359 px de altura. TileSprite já repete
+            // o desenho na largura; mantê-la em 1:1 evita aumentar os pixels
+            // da vegetação na margem do lago.
+            const groundTextureHeight = 60;
             scene.add
-                .tileSprite(x0, GROUND_Y - 15, PHASE_WIDTH, groundHeight, 'forest-ground')
+                .tileSprite(x0, GROUND_Y - 5, PHASE_WIDTH, groundTextureHeight, 'forest-ground')
                 .setOrigin(0, 0)
-                .setTileScale(groundScale, groundScale)
-                .setDepth(0);
+                .setTileScale(0.3, 0.3)
+                .setDepth(50);
 
             // Base d'água por baixo do chão inteiro; o reflexo ao vivo (câmera
             // espelhada) é ligado em Game.ts depois que HUD/mapa existem.
@@ -182,7 +191,7 @@ export const PHASES: PhaseDefinition[] = [
         subtitle: 'Dunas sob o sol escaldante',
         draw: (scene, x0) => {
             const sky = scene.add.graphics().setDepth(-10);
-            fillSky(sky, x0, [[170, 0xfbe3a2], [330, 0xf3b45d], [480, 0xe9843a], [654, 0xd9692f]]);
+            fillSky(sky, x0, [[scaleY(170), 0xfbe3a2], [scaleY(330), 0xf3b45d], [scaleY(480), 0xe9843a], [GROUND_Y, 0xd9692f]]);
 
             const sun = scene.add.graphics().setDepth(-9);
             sun.fillStyle(0xffe08a, 0.25).fillCircle(x0 + 2100, 170, 95);
@@ -191,15 +200,15 @@ export const PHASES: PhaseDefinition[] = [
             const dunes = scene.add.graphics().setDepth(-6);
             let di = 0;
             for (let x = x0 - 40; x < x0 + PHASE_WIDTH; x += 420, di++) {
-                const peakY = 460 + (di % 3) * 40;
+                const peakY = scaleY(460 + (di % 3) * 40);
                 dunes.fillStyle(di % 2 === 0 ? 0xd99840 : 0xc47f33);
-                dunes.fillTriangle(x, 654, x + 210, peakY, x + 420, 654);
+                dunes.fillTriangle(x, GROUND_Y, x + 210, peakY, x + 420, GROUND_Y);
             }
 
             const cacti = scene.add.graphics().setDepth(-3);
             let ci = 0;
             for (let x = 160; x < PHASE_WIDTH - 60; x += 320, ci++) {
-                drawCactus(cacti, x0 + x, 654, 48 + (ci % 4) * 12, 14 + (ci % 2) * 4);
+                drawCactus(cacti, x0 + x, GROUND_Y, 48 + (ci % 4) * 12, 14 + (ci % 2) * 4);
             }
 
             drawClouds(scene, x0, 0xffffff);
@@ -220,15 +229,15 @@ export const PHASES: PhaseDefinition[] = [
         subtitle: 'Gelo e silêncio nas alturas',
         draw: (scene, x0) => {
             const sky = scene.add.graphics().setDepth(-10);
-            fillSky(sky, x0, [[170, 0x9fc4e8], [330, 0xc7dcf2], [480, 0xe6f2fb], [654, 0xf4fafe]]);
+            fillSky(sky, x0, [[scaleY(170), 0x9fc4e8], [scaleY(330), 0xc7dcf2], [scaleY(480), 0xe6f2fb], [GROUND_Y, 0xf4fafe]]);
 
             const mts = scene.add.graphics().setDepth(-6);
             let mi = 0;
             for (let x = x0 - 40; x < x0 + PHASE_WIDTH; x += 420, mi++) {
-                const peakY = 320 + (mi % 3) * 30;
+                const peakY = scaleY(320 + (mi % 3) * 30);
                 const cx = x + 210;
                 mts.fillStyle(0xdcecf7, 0.9);
-                mts.fillTriangle(x, 554, cx, peakY, x + 420, 554);
+                mts.fillTriangle(x, scaleY(554), cx, peakY, x + 420, scaleY(554));
                 mts.fillStyle(0xffffff, 0.9);
                 mts.fillTriangle(cx - 34, peakY + 54, cx, peakY, cx + 34, peakY + 54);
             }
@@ -237,7 +246,7 @@ export const PHASES: PhaseDefinition[] = [
             let ti = 0;
             for (let x = 40; x < PHASE_WIDTH - 40; x += 190, ti++) {
                 const s = 0.75 + ((ti * 31) % 55) / 100;
-                const ty = 500 + ((ti * 17) % 46);
+                const ty = scaleY(500 + ((ti * 17) % 46));
                 drawPine(forest, x0 + x, ty, s, 0x7d634c, 0xeef6fb, 0xcfdfec);
             }
 
@@ -258,10 +267,10 @@ export const PHASES: PhaseDefinition[] = [
         subtitle: 'Ecos na escuridão',
         draw: (scene, x0) => {
             const sky = scene.add.graphics().setDepth(-10);
-            fillSky(sky, x0, [[300, 0x15101e], [500, 0x241836], [654, 0x332243]]);
+            fillSky(sky, x0, [[scaleY(300), 0x15101e], [scaleY(500), 0x241836], [GROUND_Y, 0x332243]]);
 
             const glow = scene.add.graphics().setDepth(-9);
-            glow.fillStyle(0xe7b6ff, 0.1).fillCircle(x0 + PHASE_WIDTH / 2, 180, 320);
+            glow.fillStyle(0xe7b6ff, 0.1).fillCircle(x0 + PHASE_WIDTH / 2, scaleY(180), 320);
 
             const crystals = scene.add.graphics().setDepth(-3);
             const drawCrystal = (cx: number, cy: number, h: number, w: number) => {
@@ -269,8 +278,8 @@ export const PHASES: PhaseDefinition[] = [
                 crystals.fillStyle(0xb98ae8, 0.7).fillTriangle(cx - w / 6, cy, cx, cy - h, cx + w / 6, cy);
             };
             [220, 760, 1320, 1880, 2280].forEach((px, i) => {
-                drawCrystal(x0 + px, 300 + (i % 3) * 16, 70 + (i % 4) * 18, 30 + (i % 3) * 10);
-                drawCrystal(x0 + px + 46, 318 + (i % 3) * 14, 52 + (i % 4) * 12, 24 + (i % 3) * 8);
+                drawCrystal(x0 + px, scaleY(300 + (i % 3) * 16), 70 + (i % 4) * 18, 30 + (i % 3) * 10);
+                drawCrystal(x0 + px + 46, scaleY(318 + (i % 3) * 14), 52 + (i % 4) * 12, 24 + (i % 3) * 8);
             });
 
             const stalactites = scene.add.graphics().setDepth(2);
@@ -297,28 +306,28 @@ export const PHASES: PhaseDefinition[] = [
         subtitle: 'Cinzas queimando o horizonte',
         draw: (scene, x0) => {
             const sky = scene.add.graphics().setDepth(-10);
-            fillSky(sky, x0, [[170, 0x301830], [330, 0x64263a], [480, 0xb13a2e], [654, 0xe0752f]]);
+            fillSky(sky, x0, [[scaleY(170), 0x301830], [scaleY(330), 0x64263a], [scaleY(480), 0xb13a2e], [GROUND_Y, 0xe0752f]]);
 
             const sun = scene.add.graphics().setDepth(-9);
-            sun.fillStyle(0xff5a3c, 0.5).fillCircle(x0 + PHASE_WIDTH / 2, 330, 100);
-            sun.fillStyle(0xffb347, 0.85).fillCircle(x0 + PHASE_WIDTH / 2, 340, 70);
+            sun.fillStyle(0xff5a3c, 0.5).fillCircle(x0 + PHASE_WIDTH / 2, scaleY(330), 100);
+            sun.fillStyle(0xffb347, 0.85).fillCircle(x0 + PHASE_WIDTH / 2, scaleY(340), 70);
 
             const stripes = scene.add.graphics().setDepth(-9);
-            sunsetStripes(stripes, x0, [[560, 0xe0752f], [480, 0xb13a2e], [410, 0x64263a]]);
+            sunsetStripes(stripes, x0, [[scaleY(560), 0xe0752f], [scaleY(480), 0xb13a2e], [scaleY(410), 0x64263a]]);
 
             const volcano = scene.add.graphics().setDepth(-6);
             volcano.fillStyle(0x3b241b);
-            volcano.fillTriangle(x0 + 480, 654, x0 + 780, 430, x0 + 1080, 654);
+            volcano.fillTriangle(x0 + 480, GROUND_Y, x0 + 780, scaleY(430), x0 + 1080, GROUND_Y);
             volcano.fillStyle(0x512b1c);
-            volcano.fillTriangle(x0 + 760, 654, x0 + 1240, 390, x0 + 1720, 654);
-            volcano.fillStyle(0xff7a3c, 0.85).fillTriangle(x0 + 1240, 390, x0 + 1230, 414, x0 + 1250, 414);
-            volcano.fillStyle(0xffc847, 0.85).fillCircle(x0 + 1240, 386, 8);
+            volcano.fillTriangle(x0 + 760, GROUND_Y, x0 + 1240, scaleY(390), x0 + 1720, GROUND_Y);
+            volcano.fillStyle(0xff7a3c, 0.85).fillTriangle(x0 + 1240, scaleY(390), x0 + 1230, scaleY(414), x0 + 1250, scaleY(414));
+            volcano.fillStyle(0xffc847, 0.85).fillCircle(x0 + 1240, scaleY(386), 8);
 
             const smoke = scene.add.graphics().setDepth(-5);
             smoke.fillStyle(0x5a3a3a, 0.4);
-            smoke.fillCircle(x0 + 1220, 340, 16);
-            smoke.fillCircle(x0 + 1250, 324, 20);
-            smoke.fillCircle(x0 + 1280, 346, 14);
+            smoke.fillCircle(x0 + 1220, scaleY(340), 16);
+            smoke.fillCircle(x0 + 1250, scaleY(324), 20);
+            smoke.fillCircle(x0 + 1280, scaleY(346), 14);
 
             drawClouds(scene, x0, 0xffc9a0);
             drawGround(scene, x0, 0x3f2117, 0x6b3220, 0x54281a, 0xe2683c);
@@ -338,11 +347,11 @@ export const PHASES: PhaseDefinition[] = [
         subtitle: 'A fronteira final',
         draw: (scene, x0) => {
             const sky = scene.add.graphics().setDepth(-10);
-            fillSky(sky, x0, [[170, 0x2a2340], [330, 0x3c3157], [480, 0x5c4b70], [654, 0x8a7488]]);
+            fillSky(sky, x0, [[scaleY(170), 0x2a2340], [scaleY(330), 0x3c3157], [scaleY(480), 0x5c4b70], [GROUND_Y, 0x8a7488]]);
 
             const moon = scene.add.graphics().setDepth(-7);
-            moon.fillStyle(0xe8d9ff, 0.9).fillCircle(x0 + 2100, 150, 44);
-            moon.fillStyle(0xc7b3e8, 0.6).fillCircle(x0 + 2088, 138, 7);
+            moon.fillStyle(0xe8d9ff, 0.9).fillCircle(x0 + 2100, scaleY(150), 44);
+            moon.fillStyle(0xc7b3e8, 0.6).fillCircle(x0 + 2088, scaleY(138), 7);
 
             const pillars = scene.add.graphics().setDepth(-3);
             const drawPillar = (px: number, pw: number, ph: number) => {

@@ -1,4 +1,4 @@
-import { Cameras, GameObjects, Input, Physics, Scene } from 'phaser';
+import { GameObjects, Input, Physics, Scene } from 'phaser';
 
 import { MeleeHitbox } from '../combat/MeleeHitbox';
 import { DamageSource } from '../damage/damage';
@@ -54,10 +54,8 @@ export class PhaseScene extends Scene {
     private pauseTitle!: GameObjects.Text;
     private pauseHint!: GameObjects.Text;
 
-    // Câmera do reflexo do lago (só existe na fase 'forest', ver
-    // setupLakeReflection). Precisa ignorar HUD/mapa, por isso os elementos
-    // de UI ficam guardados aqui conforme são criados.
-    private reflectionCam?: Cameras.Scene2D.Camera;
+    // Textura espelhada do lago, criada apenas na floresta.
+    private lakeReflection?: GameObjects.RenderTexture;
     private hudObjects: GameObjects.GameObject[] = [];
 
     constructor(phase: PhaseDefinition, phaseIndex: number) {
@@ -79,6 +77,7 @@ export class PhaseScene extends Scene {
         this.lastHp = -1;
         this.mapPhaseNodes = [];
         this.isPaused = false;
+        this.lakeReflection = undefined;
 
         const difficulty = (this.registry.get('difficulty') as Difficulty) ?? 'normal';
         writeSave({
@@ -221,11 +220,8 @@ export class PhaseScene extends Scene {
             this.updateMapMarker();
         }
 
-        // A câmera do reflexo é um objeto à parte da câmera principal — ela não
-        // segue o jogador sozinha, então o scroll horizontal é copiado todo
-        // frame pra mostrar a mesma fatia do mundo, só que espelhada.
-        if (this.reflectionCam) {
-            this.reflectionCam.scrollX = this.cameras.main.scrollX;
+        if (this.lakeReflection) {
+            this.updateLakeReflection();
         }
     }
 
@@ -604,6 +600,7 @@ export class PhaseScene extends Scene {
 
         this.pausePanel = this.add
             .container(0, 0, [this.pausePanelGraphics, this.pauseTitle, this.pauseHint])
+            .setDepth(101)
             .setVisible(false);
         this.repositionPauseOverlay();
     }
@@ -716,59 +713,51 @@ export class PhaseScene extends Scene {
         }
     }
 
-    // Reflexo "de verdade" do lago: uma segunda câmera olhando pra mesma cena
-    // ao vivo (cenário, jogador, inimigos), espelhada verticalmente, desenhada
-    // por cima da base d'água (ver drawWaterBase em phases.ts). Não é uma
-    // imagem congelada — é o jogo rodando duas vezes.
+    // Captura a metade superior da cena e a exibe invertida na metade inferior.
     private setupLakeReflection() {
-        const viewportY = FOREST_WATER_TOP_Y;
-        const viewportHeight = HEIGHT - FOREST_WATER_TOP_Y;
+        const width = this.scale.width;
+        const height = HEIGHT - FOREST_WATER_TOP_Y;
+        const rt = this.add.renderTexture(0, FOREST_WATER_TOP_Y, width, height);
+        rt.setOrigin(0, 0);
+        rt.setScrollFactor(0);
+        rt.setFlipY(true);
+        rt.setAlpha(0.85);
+        // Fica acima da base azul (0.5), mas abaixo da borda/espuma (0.6),
+        // preservando visualmente a transição entre terreno e água.
+        rt.setDepth(0.55);
 
-        // Quanto de cenário (em px de mundo, medidos a partir do GROUND_Y pra
-        // cima) cabe "amassado" dentro da faixa fina de água. Cobre a árvore/
-        // casa inteira (450px, ver treesHeight em phases.ts) e ainda pega uma
-        // fatia da montanha, em vez de só o pé do tronco.
-        const reflectedWorldHeight = 380;
-
-        const cam = this.cameras.add(0, viewportY, this.scale.width, viewportHeight);
-        cam.setName('lake-reflection');
-
-        // zoomX = 1: mesma largura de mundo que a câmera principal mostra (o
-        // reflexo bate exatamente com o que está visível em cima, sem sobrar
-        // nem faltar dos lados). zoomY negativo e bem menor que 1: espelha E
-        // "afasta" a vertical, encolhendo os 550px de cenário pra caber nos
-        // poucos pixels de faixa d'água disponíveis — senão só a base das
-        // árvores aparecia, cortada.
-        cam.setZoom(1, -viewportHeight / reflectedWorldHeight);
-        cam.setAlpha(0.96);
-
-        // scrollY: 654 (GROUND_Y) faz o mundo em y=GROUND_Y aparecer no topo
-        // do viewport (a "linha d'água") e o mundo em
-        // y=GROUND_Y-reflectedWorldHeight aparecer no fundo — ou seja, reflete
-        // a faixa de cenário logo acima do chão, e não o próprio chão/água
-        // (que ficam abaixo de GROUND_Y e nunca entram nessa janela). Esse
-        // valor não depende do zoom, só do ponto que deve ficar na borda
-        // superior do reflexo.
-        cam.scrollY = GROUND_Y;
-
-        // HUD e mapa são fixos na tela (scrollFactor 0); sem isso eles
-        // vazariam, minúsculos, dentro da janela de reflexo.
-        cam.ignore(this.hudObjects);
-        cam.ignore(this.mapOverlay);
-        cam.ignore(this.pausePanel);
-
-        this.reflectionCam = cam;
-        this.resizeLakeReflection();
+        this.lakeReflection = rt;
         this.scale.off('resize', this.resizeLakeReflection, this);
         this.scale.on('resize', this.resizeLakeReflection, this);
     }
 
     private resizeLakeReflection() {
-        if (!this.reflectionCam) {
+        if (!this.lakeReflection) {
             return;
         }
 
-        this.reflectionCam.setSize(this.scale.width, HEIGHT - FOREST_WATER_TOP_Y);
+        // RenderTexture possui um framebuffer próprio. setSize muda só a imagem
+        // exibida; resize mantém a área de captura sincronizada ao viewport.
+        this.lakeReflection.resize(this.scale.width, HEIGHT - FOREST_WATER_TOP_Y);
+    }
+
+    private updateLakeReflection() {
+        const rt = this.lakeReflection!;
+        rt.clear();
+        rt.camera.setScroll(this.cameras.main.scrollX, 0);
+
+        const excluded = new Set<GameObjects.GameObject>([
+            rt,
+            this.dashIndicator,
+            ...this.hudObjects,
+            this.mapOverlay,
+            this.pausePanel
+        ]);
+        const toDraw = this.children.list.filter(object => !excluded.has(object));
+        rt.draw(toDraw);
+        // No Phaser 4, draw apenas grava comandos. render os aplica ao
+        // framebuffer; sem isso a RenderTexture fica transparente.
+        rt.render();
     }
 
     private repositionResponsiveUI() {
@@ -835,4 +824,5 @@ export class PhaseScene extends Scene {
         this.mapMarker.x = mapStartX + (mapEndX - mapStartX) * worldProgress;
         this.mapLocationText.setText(`${this.phase.name} - ${Math.round(phaseProgress * 100)}% explorado`);
     }
+
 }
