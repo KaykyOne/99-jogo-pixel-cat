@@ -146,7 +146,7 @@ export class MenuScene extends Scene {
 
     private startNewRun(difficulty: Difficulty) {
         this.registry.set('difficulty', difficulty);
-        writeSave({ phaseIndex: 0, difficulty });
+        writeSave({ phaseIndex: 0, difficulty, clearedPhases: [] });
         this.scene.start(PHASES[0].key, { spawnX: 200 });
     }
 

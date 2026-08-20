@@ -3,6 +3,7 @@ export type Difficulty = 'normal' | 'hard';
 export type SaveData = {
     phaseIndex: number;
     difficulty: Difficulty;
+    clearedPhases: number[];
 };
 
 const STORAGE_KEY = 'jogo-99:save';
@@ -21,7 +22,14 @@ export function loadSave(): SaveData | null {
             return null;
         }
 
-        return parsed;
+        return {
+            phaseIndex: parsed.phaseIndex,
+            difficulty: parsed.difficulty,
+            // Saves criados antes do mapa RPG não tinham este campo.
+            clearedPhases: Array.isArray(parsed.clearedPhases)
+                ? parsed.clearedPhases.filter((index): index is number => typeof index === 'number')
+                : []
+        };
     } catch {
         // localStorage pode não estar disponível (por exemplo, em navegação
         // privada). O jogo continua normalmente, apenas sem persistência.
@@ -45,7 +53,7 @@ export function clearSave(): void {
     }
 }
 
-function isSaveData(value: unknown): value is SaveData {
+function isSaveData(value: unknown): value is Omit<SaveData, 'clearedPhases'> & { clearedPhases?: unknown } {
     if (typeof value !== 'object' || value === null) {
         return false;
     }

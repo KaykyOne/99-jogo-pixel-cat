@@ -7,7 +7,7 @@ import { BaseEnemy } from '../entities/BaseEnemy';
 import { Boss } from '../entities/Boss';
 import { createEnemy } from '../entities/enemy-factory';
 import { Player } from '../entities/Player';
-import { clearSave, Difficulty, writeSave } from '../state/save';
+import { clearSave, Difficulty, loadSave, writeSave } from '../state/save';
 import { FOREST_WATER_TOP_Y, GROUND_Y, HEIGHT, PHASES, PHASE_WIDTH, PhaseDefinition } from '../world/phases';
 
 type Portal = {
@@ -23,6 +23,8 @@ type SceneData = {
     spawnX: number;
 };
 
+type MapPhaseState = 'locked' | 'reached' | 'cleared';
+
 export class PhaseScene extends Scene {
     private phase: PhaseDefinition;
     private phaseIndex: number;
@@ -33,8 +35,10 @@ export class PhaseScene extends Scene {
     private teleporting = false;
     private phaseCleared = false;
     private mapKey!: Input.Keyboard.Key;
+    private pauseKey!: Input.Keyboard.Key;
+    private isPaused = false;
     private mapOverlay!: GameObjects.Container;
-    private mapMarker!: GameObjects.Arc;
+    private mapMarker!: GameObjects.Star;
     private mapLocationText!: GameObjects.Text;
     private hpText!: GameObjects.Text;
     private lastHp = -1;
@@ -44,7 +48,11 @@ export class PhaseScene extends Scene {
     private mapRoute!: GameObjects.Graphics;
     private mapTitle!: GameObjects.Text;
     private mapHint!: GameObjects.Text;
-    private mapPhaseNodes: { node: GameObjects.Arc; label: GameObjects.Text }[] = [];
+    private mapPhaseNodes: { icon: GameObjects.Graphics; label: GameObjects.Text; x: number }[] = [];
+    private pausePanel!: GameObjects.Container;
+    private pausePanelGraphics!: GameObjects.Graphics;
+    private pauseTitle!: GameObjects.Text;
+    private pauseHint!: GameObjects.Text;
 
     // Câmera do reflexo do lago (só existe na fase 'forest', ver
     // setupLakeReflection). Precisa ignorar HUD/mapa, por isso os elementos
@@ -70,9 +78,14 @@ export class PhaseScene extends Scene {
         this.phaseCleared = false;
         this.lastHp = -1;
         this.mapPhaseNodes = [];
+        this.isPaused = false;
 
         const difficulty = (this.registry.get('difficulty') as Difficulty) ?? 'normal';
-        writeSave({ phaseIndex: this.phaseIndex, difficulty });
+        writeSave({
+            phaseIndex: this.phaseIndex,
+            difficulty,
+            clearedPhases: loadSave()?.clearedPhases ?? []
+        });
 
         this.physics.world.setBounds(0, 0, PHASE_WIDTH, HEIGHT);
         // Uma gravidade mais firme deixa os saltos responsivos sem o personagem
@@ -118,6 +131,9 @@ export class PhaseScene extends Scene {
         this.buildPortals();
         this.createHud();
         this.createMapOverlay();
+        this.createPauseOverlay();
+
+        this.pauseKey = this.input.keyboard!.addKey(Input.Keyboard.KeyCodes.ESC);
 
         const camera = this.cameras.main;
         camera.setBounds(0, 0, PHASE_WIDTH, HEIGHT);
@@ -139,6 +155,20 @@ export class PhaseScene extends Scene {
     }
 
     update(time: number, delta: number) {
+        if (Input.Keyboard.JustDown(this.pauseKey)) {
+            // ESC fecha primeiro o painel que já está aberto, em vez de
+            // empilhar pausa por cima do mapa.
+            if (this.mapOverlay.visible) {
+                this.mapOverlay.setVisible(false);
+            } else {
+                this.togglePause();
+            }
+        }
+
+        if (this.isPaused) {
+            return;
+        }
+
         this.player.update(time, delta);
         this.refreshHudHp();
         this.updateDashIndicator();
@@ -168,6 +198,13 @@ export class PhaseScene extends Scene {
             this.enemies.every(enemy => !enemy.isAlive)
         ) {
             this.phaseCleared = true;
+            const difficulty = (this.registry.get('difficulty') as Difficulty) ?? 'normal';
+            const save = loadSave();
+            const clearedPhases = Array.from(
+                new Set([...(save?.clearedPhases ?? []), this.phaseIndex])
+            );
+            writeSave({ phaseIndex: this.phaseIndex, difficulty, clearedPhases });
+            this.refreshMapNodes();
             this.unlockExitPortal();
         }
 
@@ -175,6 +212,9 @@ export class PhaseScene extends Scene {
 
         if (Input.Keyboard.JustDown(this.mapKey)) {
             this.mapOverlay.setVisible(!this.mapOverlay.visible);
+            if (this.mapOverlay.visible) {
+                this.refreshMapNodes();
+            }
         }
 
         if (this.mapOverlay.visible) {
@@ -509,28 +549,171 @@ export class PhaseScene extends Scene {
         const mapY = 365;
 
         const children: GameObjects.GameObject[] = [this.mapPanel, this.mapTitle, this.mapHint, this.mapRoute];
-        PHASES.forEach((phase, index) => {
-            const active = index === this.phaseIndex;
-            const node = this.add.circle(0, mapY, active ? 16 : 12, active ? 0xf7e7b0 : 0x6f8b71);
+        PHASES.forEach((phase) => {
+            const icon = this.add.graphics();
             const label = this.add
                 .text(0, mapY + 39, phase.name, {
-                    fontFamily: 'monospace', fontSize: '10px', color: active ? '#f7e7b0' : '#b9cbb1',
+                    fontFamily: 'monospace', fontSize: '10px', color: '#b9cbb1',
                     align: 'center', wordWrap: { width: 100 }
                 })
                 .setOrigin(0.5, 0);
-            this.mapPhaseNodes.push({ node, label });
-            children.push(node, label);
+            this.mapPhaseNodes.push({ icon, label, x: 0 });
+            children.push(icon, label);
         });
 
-        this.mapMarker = this.add.circle(0, mapY, 8, 0xff6b4a).setStrokeStyle(3, 0xfff2c2);
+        this.mapMarker = this.add.star(0, mapY, 5, 5, 11, 0xff6b4a).setStrokeStyle(2, 0xfff2c2);
         this.mapLocationText = this.add
             .text(0, 535, '', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' })
             .setOrigin(0.5);
         children.push(this.mapMarker, this.mapLocationText);
 
         this.mapOverlay = this.add.container(0, 0, children).setDepth(100).setScrollFactor(0).setVisible(false);
+        this.tweens.add({
+            targets: this.mapMarker,
+            scale: 1.15,
+            duration: 650,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.inOut'
+        });
         this.repositionResponsiveUI();
+        this.refreshMapNodes();
         this.updateMapMarker();
+    }
+
+    private createPauseOverlay() {
+        this.pausePanelGraphics = this.add.graphics().setScrollFactor(0).setDepth(101);
+        this.pauseTitle = this.add
+            .text(0, 340, 'PAUSADO', {
+                fontFamily: 'Georgia, serif',
+                fontSize: '28px',
+                color: '#f7e7b0'
+            })
+            .setOrigin(0.5)
+            .setScrollFactor(0)
+            .setDepth(102);
+        this.pauseHint = this.add
+            .text(0, 400, 'ESC para continuar', {
+                fontFamily: 'monospace',
+                fontSize: '13px',
+                color: '#b9cbb1'
+            })
+            .setOrigin(0.5)
+            .setScrollFactor(0)
+            .setDepth(102);
+
+        this.pausePanel = this.add
+            .container(0, 0, [this.pausePanelGraphics, this.pauseTitle, this.pauseHint])
+            .setVisible(false);
+        this.repositionPauseOverlay();
+    }
+
+    private togglePause() {
+        this.isPaused = !this.isPaused;
+
+        if (this.isPaused) {
+            this.physics.world.pause();
+            this.time.paused = true;
+            this.pausePanel.setVisible(true);
+            return;
+        }
+
+        this.physics.world.resume();
+        this.time.paused = false;
+        this.pausePanel.setVisible(false);
+    }
+
+    private refreshMapNodes() {
+        const save = loadSave();
+        const reachedPhase = Math.max(this.phaseIndex, save?.phaseIndex ?? 0);
+        const clearedPhases = new Set(save?.clearedPhases ?? []);
+        if (this.phaseCleared) {
+            clearedPhases.add(this.phaseIndex);
+        }
+
+        this.mapPhaseNodes.forEach(({ icon, label, x }, index) => {
+            const state: MapPhaseState = index > reachedPhase
+                ? 'locked'
+                : clearedPhases.has(index)
+                    ? 'cleared'
+                    : 'reached';
+
+            this.drawMapPhaseIcon(icon, x, 365, PHASES[index].key, state);
+            label.setColor(state === 'locked' ? '#66707a' : state === 'cleared' ? '#f7e7b0' : '#b9cbb1');
+            label.setAlpha(state === 'locked' ? 0.5 : 1);
+        });
+    }
+
+    private drawMapPhaseIcon(
+        graphics: GameObjects.Graphics,
+        x: number,
+        y: number,
+        phaseKey: string,
+        state: MapPhaseState
+    ) {
+        const isLocked = state === 'locked';
+        const color = isLocked ? 0x3a3a3a : this.mapBiomeColor(phaseKey);
+
+        graphics.clear();
+        graphics.setAlpha(isLocked ? 0.5 : 1);
+        graphics.fillStyle(color, 1);
+        graphics.lineStyle(2, isLocked ? 0x59616b : 0x10212b, 0.95);
+
+        switch (phaseKey) {
+            case 'forest':
+                graphics.fillTriangle(x, y - 17, x - 12, y + 9, x + 12, y + 9);
+                graphics.fillRect(x - 3, y + 7, 6, 7);
+                graphics.strokeTriangle(x, y - 17, x - 12, y + 9, x + 12, y + 9);
+                break;
+            case 'desert':
+                graphics.fillTriangle(x, y - 14, x - 14, y, x + 14, y);
+                graphics.fillTriangle(x, y + 14, x - 14, y, x + 14, y);
+                graphics.strokeTriangle(x, y - 14, x - 14, y, x + 14, y);
+                graphics.strokeTriangle(x, y + 14, x - 14, y, x + 14, y);
+                break;
+            case 'snow':
+                graphics.fillCircle(x, y, 12);
+                graphics.lineStyle(2, isLocked ? 0x59616b : 0xffffff, 0.9);
+                graphics.lineBetween(x - 14, y, x + 14, y);
+                graphics.lineBetween(x, y - 14, x, y + 14);
+                graphics.lineBetween(x - 10, y - 10, x + 10, y + 10);
+                graphics.lineBetween(x + 10, y - 10, x - 10, y + 10);
+                break;
+            case 'cave':
+                graphics.fillTriangle(x, y - 15, x - 14, y + 10, x + 14, y + 10);
+                graphics.fillTriangle(x, y + 15, x - 14, y - 10, x + 14, y - 10);
+                graphics.strokeTriangle(x, y - 15, x - 14, y + 10, x + 14, y + 10);
+                graphics.strokeTriangle(x, y + 15, x - 14, y - 10, x + 14, y - 10);
+                break;
+            case 'volcano':
+                graphics.fillTriangle(x, y - 16, x - 15, y + 12, x + 15, y + 12);
+                graphics.strokeTriangle(x, y - 16, x - 15, y + 12, x + 15, y + 12);
+                graphics.fillStyle(isLocked ? 0x3a3a3a : 0xffc847, 1).fillCircle(x, y + 3, 4);
+                break;
+            case 'ruins':
+                graphics.fillRect(x - 7, y - 15, 14, 30);
+                graphics.fillRect(x - 11, y - 15, 22, 5);
+                graphics.strokeRect(x - 7, y - 15, 14, 30);
+                break;
+        }
+
+        if (state === 'cleared') {
+            graphics.lineStyle(2, 0xf7e7b0, 1).strokeCircle(x, y, 20);
+            graphics.lineBetween(x - 7, y + 1, x - 1, y + 7);
+            graphics.lineBetween(x - 1, y + 7, x + 10, y - 7);
+        }
+    }
+
+    private mapBiomeColor(phaseKey: string): number {
+        switch (phaseKey) {
+            case 'forest': return 0x4f9b5a;
+            case 'desert': return 0xe0b15c;
+            case 'snow': return 0x9ed6f5;
+            case 'cave': return 0x9a7bc0;
+            case 'volcano': return 0xe2683c;
+            case 'ruins': return 0xa8a286;
+            default: return 0x6f8b71;
+        }
     }
 
     // Reflexo "de verdade" do lago: uma segunda câmera olhando pra mesma cena
@@ -572,6 +755,7 @@ export class PhaseScene extends Scene {
         // vazariam, minúsculos, dentro da janela de reflexo.
         cam.ignore(this.hudObjects);
         cam.ignore(this.mapOverlay);
+        cam.ignore(this.pausePanel);
 
         this.reflectionCam = cam;
         this.resizeLakeReflection();
@@ -602,20 +786,43 @@ export class PhaseScene extends Scene {
         this.mapPanel.lineStyle(2, 0xb8cc84, 0.85).strokeRoundedRect(panelX, 118, 800, 532, 14);
 
         this.mapRoute.clear();
-        this.mapRoute.lineStyle(8, 0x3e5266, 1).lineBetween(mapStartX, mapY, mapEndX, mapY);
-        this.mapRoute.lineStyle(2, 0xc8d897, 0.72).lineBetween(mapStartX, mapY, mapEndX, mapY);
+        this.mapRoute.fillStyle(0x3e5266, 1);
+        for (let x = mapStartX; x <= mapEndX; x += 14) {
+            this.mapRoute.fillCircle(x, mapY, 3);
+        }
+        this.mapRoute.fillStyle(0xc8d897, 0.72);
+        for (let x = mapStartX + 3; x <= mapEndX; x += 14) {
+            this.mapRoute.fillCircle(x, mapY, 1);
+        }
 
         this.mapTitle.x = centerX;
         this.mapHint.x = centerX;
         this.mapLocationText.x = centerX;
 
-        this.mapPhaseNodes.forEach(({ node, label }, index) => {
+        this.mapPhaseNodes.forEach((entry, index) => {
             const x = mapStartX + segmentWidth * index;
-            node.x = x;
-            label.x = x;
+            entry.x = x;
+            entry.label.x = x;
         });
 
+        this.refreshMapNodes();
+        this.repositionPauseOverlay();
         this.updateMapMarker();
+    }
+
+    private repositionPauseOverlay() {
+        if (!this.pausePanelGraphics) {
+            return;
+        }
+
+        const centerX = this.scale.width / 2;
+        const panelX = centerX - 150;
+
+        this.pausePanelGraphics.clear();
+        this.pausePanelGraphics.fillStyle(0x08111d, 0.92).fillRoundedRect(panelX, 284, 300, 200, 14);
+        this.pausePanelGraphics.lineStyle(2, 0xb8cc84, 0.85).strokeRoundedRect(panelX, 284, 300, 200, 14);
+        this.pauseTitle.x = centerX;
+        this.pauseHint.x = centerX;
     }
 
     private updateMapMarker() {
