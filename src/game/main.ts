@@ -2,12 +2,14 @@ import { AUTO, Game, Scale, Types } from 'phaser';
 
 import { PreloadScene } from './scenes/PreloadScene';
 import { PhaseScene } from './scenes/Game';
+import { MenuScene } from './scenes/MenuScene';
 import { PHASES } from './world/phases';
 
 // Find out more information about the Game Config at:
 // https://docs.phaser.io/api-documentation/typedef/types-core#gameconfig
 const scenes = [
     PreloadScene,
+    MenuScene,
     ...PHASES.map((phase, index) => new PhaseScene(phase, index))
 ];
 

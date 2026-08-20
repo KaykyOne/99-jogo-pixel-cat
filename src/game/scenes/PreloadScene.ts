@@ -2,6 +2,7 @@ import { Scene } from 'phaser';
 
 import { createEnemyAnimations } from '../animations/enemy-animations';
 import { createPlayerAnimations } from '../animations/player-animations';
+import { createPortalAnimations } from '../animations/portal-animations';
 
 export class PreloadScene extends Scene {
     constructor() {
@@ -23,6 +24,13 @@ export class PreloadScene extends Scene {
         this.load.image('forest-trees', 'florest/arvores-casas-trim.png');
         this.load.image('forest-ground', 'florest/chao-strip.png');
         this.load.image('forest-water-edge', 'florest/borda-agua-strip.png');
+
+        // O spritesheet tem 2172×724px. Os oito frames de 271px deixam uma
+        // borda excedente de 4px ao fim da imagem, que não faz parte dos frames.
+        this.load.spritesheet('portal-activate', 'portal/portal-activate.png', {
+            frameWidth: 271,
+            frameHeight: 724
+        });
 
         this.load.spritesheet('player-jump', 'player/jump.png', { frameWidth: 48, frameHeight: 48 });
         this.load.spritesheet('player-idle', 'player/idle.png', { frameWidth: 48, frameHeight: 48 });
@@ -50,6 +58,7 @@ export class PreloadScene extends Scene {
     create() {
         createPlayerAnimations(this);
         createEnemyAnimations(this);
-        this.scene.start('forest', { spawnX: 200 });
+        createPortalAnimations(this);
+        this.scene.start('Menu');
     }
 }

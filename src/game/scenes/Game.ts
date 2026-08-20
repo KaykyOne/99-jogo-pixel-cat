@@ -6,6 +6,7 @@ import { EnemyType } from '../damage/health-config';
 import { BaseEnemy } from '../entities/BaseEnemy';
 import { createEnemy } from '../entities/enemy-factory';
 import { Player } from '../entities/Player';
+import { clearSave, Difficulty, writeSave } from '../state/save';
 import { FOREST_WATER_TOP_Y, GROUND_Y, HEIGHT, PHASES, PHASE_WIDTH, PhaseDefinition } from '../world/phases';
 
 type Portal = {
@@ -13,6 +14,8 @@ type Portal = {
     targetKey: string;
     spawnX: number;
     direction: 1 | -1;
+    requiresClear: boolean;
+    sprite: GameObjects.Sprite;
 };
 
 type SceneData = {
@@ -27,6 +30,7 @@ export class PhaseScene extends Scene {
     private enemies: BaseEnemy[] = [];
     private portals: Portal[] = [];
     private teleporting = false;
+    private phaseCleared = false;
     private mapKey!: Input.Keyboard.Key;
     private mapOverlay!: GameObjects.Container;
     private mapMarker!: GameObjects.Arc;
@@ -49,6 +53,19 @@ export class PhaseScene extends Scene {
     }
 
     create(data: SceneData) {
+        // O Phaser reaproveita esta mesma instância em scene.restart() (o
+        // respawn do modo Normal). Sem resetar esses campos, objetos e flags
+        // da vida anterior acumulam ou ficam presos na nova vida.
+        this.enemies = [];
+        this.portals = [];
+        this.hudObjects = [];
+        this.teleporting = false;
+        this.phaseCleared = false;
+        this.lastHp = -1;
+
+        const difficulty = (this.registry.get('difficulty') as Difficulty) ?? 'normal';
+        writeSave({ phaseIndex: this.phaseIndex, difficulty });
+
         this.physics.world.setBounds(0, 0, PHASE_WIDTH, HEIGHT);
         // Uma gravidade mais firme deixa os saltos responsivos sem o personagem
         // parecer flutuar.
@@ -125,6 +142,15 @@ export class PhaseScene extends Scene {
 
         for (const enemy of this.enemies) {
             enemy.update(time, delta);
+        }
+
+        if (
+            !this.phaseCleared &&
+            this.enemies.length > 0 &&
+            this.enemies.every(enemy => !enemy.isAlive)
+        ) {
+            this.phaseCleared = true;
+            this.unlockExitPortal();
         }
 
         this.handlePortals();
@@ -237,7 +263,15 @@ export class PhaseScene extends Scene {
 
     // Reinicia a fase após a morte do jogador, com um breve fade-out.
     private handlePlayerDeath() {
+        const difficulty = (this.registry.get('difficulty') as Difficulty) ?? 'normal';
+
         this.cameras.main.fadeOut(420, 0, 0, 0, () => {
+            if (difficulty === 'hard') {
+                clearSave();
+                this.scene.start(PHASES[0].key, { spawnX: 200 });
+                return;
+            }
+
             this.scene.restart({ spawnX: PHASE_WIDTH / 2 });
         });
     }
@@ -279,55 +313,53 @@ export class PhaseScene extends Scene {
         // Portal no fim da fase -> próxima fase.
         if (this.phaseIndex < PHASES.length - 1) {
             const bx = PHASE_WIDTH - 120;
-            this.drawPortalGate(bx);
+            const sprite = this.createPortalSprite(bx);
             this.portals.push({
                 zoneX: bx,
                 targetKey: PHASES[this.phaseIndex + 1].key,
                 spawnX: 200,
-                direction: 1
+                direction: 1,
+                requiresClear: true,
+                sprite
             });
         }
 
         // Portal no início da fase -> fase anterior.
         if (this.phaseIndex > 0) {
             const bx = 120;
-            this.drawPortalGate(bx);
+            const sprite = this.createPortalSprite(bx);
+            sprite.play('portal-active-loop');
             this.portals.push({
                 zoneX: bx,
                 targetKey: PHASES[this.phaseIndex - 1].key,
                 spawnX: PHASE_WIDTH - 200,
-                direction: -1
+                direction: -1,
+                requiresClear: false,
+                sprite
             });
         }
     }
 
-    private drawPortalGate(bx: number) {
-        const gate = this.add.graphics().setDepth(4);
+    private createPortalSprite(bx: number): GameObjects.Sprite {
+        return this.add
+            .sprite(bx, GROUND_Y +200, 'portal-activate', 0)
+            .setOrigin(0.5, 1)
+            .setDepth(4);
+    }
 
-        // Pilares de pedra.
-        gate.fillStyle(0x6b5f52).fillRect(bx - 58, GROUND_Y - 150, 24, 150);
-        gate.fillStyle(0x8a7c6b).fillRect(bx - 58, GROUND_Y - 150, 24, 12);
-        gate.fillStyle(0x6b5f52).fillRect(bx + 34, GROUND_Y - 150, 24, 150);
-        gate.fillStyle(0x8a7c6b).fillRect(bx + 34, GROUND_Y - 150, 24, 12);
+    private unlockExitPortal() {
+        const exitPortal = this.portals.find(portal => portal.requiresClear);
+        if (!exitPortal) {
+            return;
+        }
 
-        // Viga superior.
-        gate.fillStyle(0x7d6f60).fillRect(bx - 64, GROUND_Y - 166, 128, 16);
-        gate.fillStyle(0x5c5147).fillRect(bx - 64, GROUND_Y - 150, 128, 6);
+        const sprite = exitPortal.sprite;
+        sprite.play('portal-activating');
 
-        // Brilho do portal (pulsante).
-        const glow = this.add.graphics().setDepth(5);
-        glow.fillStyle(0x8ae7ff, 0.35);
-        glow.fillEllipse(bx, GROUND_Y - 80, 54, 140);
-        glow.fillStyle(0xd9f6ff, 0.5);
-        glow.fillEllipse(bx, GROUND_Y - 80, 28, 108);
-
-        this.tweens.add({
-            targets: glow,
-            alpha: 0.55,
-            duration: 900,
-            yoyo: true,
-            repeat: -1,
-            ease: 'Sine.inOut'
+        // Ao concluir a sequência de ativação, mantém o vórtice vivo nos
+        // frames finais em vez de congelar no último frame.
+        sprite.once('animationcomplete-portal-activating', () => {
+            sprite.play('portal-active-loop');
         });
     }
 
@@ -340,6 +372,10 @@ export class PhaseScene extends Scene {
         const velocityX = (this.player.body as Physics.Arcade.Body).velocity.x;
 
         for (const portal of this.portals) {
+            if (portal.requiresClear && !this.phaseCleared) {
+                continue;
+            }
+
             const isMovingIntoPortal = velocityX * portal.direction > 0;
 
             // O sentido evita que o ponto de surgimento (perto do portal de
