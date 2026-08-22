@@ -71,4 +71,30 @@ export function createPlayerAnimations(scene: Scene) {
 
         repeat: -1
     });
+
+    scene.anims.create({
+        key: 'player-hurt',
+
+        frames: scene.anims.generateFrameNumbers('player-hurt', {
+            start: 0,
+            end: 1
+        }),
+
+        frameRate: 10,
+
+        repeat: 0
+    });
+
+    scene.anims.create({
+        key: 'player-death',
+
+        frames: scene.anims.generateFrameNumbers('player-death', {
+            start: 0,
+            end: 5
+        }),
+
+        frameRate: 10,
+
+        repeat: 0
+    });
 }

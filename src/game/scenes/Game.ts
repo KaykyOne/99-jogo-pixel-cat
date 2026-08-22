@@ -52,6 +52,13 @@ type EnemySpawn = {
 // dentro de plataforma nenhuma.
 const BAT_FLIGHT_Y = GROUND_Y - 250;
 
+// Ponto de entrada da fase: onde se surge vindo do portal anterior e onde o
+// jogador renasce ao morrer.
+const PHASE_START_X = 200;
+
+// Duração da animação de morte do jogador (player-death: 6 frames a 10fps).
+const DEATH_ANIMATION_MS = 600;
+
 export class PhaseScene extends Scene {
     private phase: PhaseDefinition;
     private phaseIndex: number;
@@ -481,14 +488,21 @@ export class PhaseScene extends Scene {
     private handlePlayerDeath() {
         const difficulty = (this.registry.get('difficulty') as Difficulty) ?? 'normal';
 
-        this.cameras.main.fadeOut(420, 0, 0, 0, () => {
-            if (difficulty === 'hard') {
-                clearSave();
-                this.scene.start(PHASES[0].key, { spawnX: 200 });
-                return;
-            }
+        // Espera a animação de morte (6 frames a 10fps = 600ms) antes de
+        // começar o fade. Iniciando junto, o escurecimento comia a animação
+        // pela metade e a morte passava sem ser vista.
+        this.time.delayedCall(DEATH_ANIMATION_MS, () => {
+            this.cameras.main.fadeOut(420, 0, 0, 0, () => {
+                if (difficulty === 'hard') {
+                    clearSave();
+                    this.scene.start(PHASES[0].key, { spawnX: PHASE_START_X });
+                    return;
+                }
 
-            this.scene.restart({ spawnX: PHASE_WIDTH / 2 });
+                // Respawn no INÍCIO da fase, no mesmo ponto em que se entra
+                // por ela vindo do portal anterior — não no meio.
+                this.scene.restart({ spawnX: PHASE_START_X });
+            });
         });
     }
 

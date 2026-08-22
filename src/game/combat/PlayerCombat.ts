@@ -14,6 +14,8 @@ import { AttackDefinition } from './types';
 // trafegam pelo evento 'impact'.
 export class PlayerCombat {
     private activeAttack: AttackDefinition | null = null;
+    // Guardada para poder remover o listener de 'animationcomplete' em cancel().
+    private activeAnimationKey = '';
     private hitTargets = new Set<Physics.Arcade.Sprite>();
     private activeHitbox: MeleeHitbox | null = null;
 
@@ -86,6 +88,21 @@ export class PlayerCombat {
         this.endAttack();
     }
 
+    // Interrompe um golpe em andamento. Precisa existir porque o fim normal do
+    // ataque depende do evento 'animationcomplete' da animação do golpe: se
+    // alguém tocar OUTRA animação por cima (o Player faz isso ao levar dano),
+    // aquele evento nunca dispara, `activeAttack` fica preso para sempre e o
+    // jogador não consegue mais atacar nem se mover — `isAttacking` zera a
+    // velocidade horizontal todo frame.
+    cancel(): void {
+        if (!this.activeAttack) {
+            return;
+        }
+
+        this.owner.off('animationcomplete-' + this.activeAnimationKey);
+        this.endAttack();
+    }
+
     // Marca um alvo como já atingido por este golpe, evitando acertar duas vezes.
     markTargetHit(target: Physics.Arcade.Sprite): void {
         this.hitTargets.add(target);
@@ -106,6 +123,7 @@ export class PlayerCombat {
         // Sorteia uma das 3 variantes visuais do golpe (ver attack-variants.ts);
         // todas têm o mesmo timing de 6 frames, então a hitbox não muda.
         const animationKey = randomAttackAnimationKey('player');
+        this.activeAnimationKey = animationKey;
         this.owner.play(animationKey);
         this.owner.once('animationcomplete-' + animationKey, () => this.onAttackAnimationComplete());
     }

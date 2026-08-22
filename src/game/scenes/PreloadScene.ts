@@ -48,6 +48,11 @@ export class PreloadScene extends Scene {
         this.load.spritesheet('player-attack-2', 'player/attack.png', { frameWidth: 48, frameHeight: 48 });
         this.load.spritesheet('player-attack-3', 'player/Woodcutter_attack3.png', { frameWidth: 48, frameHeight: 48 });
 
+        // Animações de dano e morte (descobrindo tamanho via cabeçalho PNG:
+        // hurt.png 96px = 2 frames; death.png 288px = 6 frames).
+        this.load.spritesheet('player-hurt', 'player/hurt.png', { frameWidth: 48, frameHeight: 48 });
+        this.load.spritesheet('player-death', 'player/death.png', { frameWidth: 48, frameHeight: 48 });
+
         this.load.spritesheet('graverobber-idle', 'enemies/graverobber-idle.png', { frameWidth: 48, frameHeight: 48 });
         this.load.spritesheet('graverobber-walk', 'enemies/graverobber-walk.png', { frameWidth: 48, frameHeight: 48 });
         this.load.spritesheet('graverobber-attack-1', 'enemies/GraveRobber_attack1.png', { frameWidth: 48, frameHeight: 48 });

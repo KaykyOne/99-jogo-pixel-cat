@@ -243,9 +243,14 @@ export class Player extends Physics.Arcade.Sprite {
             const knockbackY = source.knockbackY ?? PLAYER_HEALTH.hurtKnockbackY;
             this.arcadeBody.setVelocity(knockbackX * direction, knockbackY);
 
-            // Não há asset de "hurt": congela a animação atual enquanto o
-            // personagem pisca/fica avermelhado durante o hitstun.
-            this.anims.pause();
+            // Um golpe em andamento precisa ser cancelado ANTES de trocar a
+            // animação: o fim do ataque depende do evento 'animationcomplete'
+            // da animação do golpe, e tocar 'player-hurt' por cima faria esse
+            // evento nunca disparar — o combate ficaria travado em "atacando"
+            // para sempre. Levar dano interrompendo o próprio golpe também é o
+            // comportamento certo: dá peso ao acerto do inimigo.
+            this.combat.cancel();
+            this.play('player-hurt');
         }
 
         return true;
@@ -468,15 +473,21 @@ export class Player extends Physics.Arcade.Sprite {
             body.enable = false;
         });
 
-        // Não há asset de morte: congela a animação e desvanece o sprite com um
-        // tom avermelhado, sem inventar animações inexistentes.
-        this.anims.pause();
-        this.setTint(0xff6b6b);
-        this.scene.tweens.add({
-            targets: this,
-            alpha: 0,
-            duration: 260,
-            ease: 'Quad.out'
+        // Anima a morte com o asset carregado em PreloadScene (6 frames a 10fps
+        // = 600ms). Sem tint: pintar o sprite de vermelho esconderia justamente
+        // o desenho que a animação existe para mostrar.
+        this.play('player-death');
+
+        // O fade só começa DEPOIS da animação terminar. Antes ele durava 260ms
+        // e apagava o personagem antes da metade da morte — a animação nunca
+        // chegava a ser vista.
+        this.once('animationcomplete-player-death', () => {
+            this.scene.tweens.add({
+                targets: this,
+                alpha: 0,
+                duration: 200,
+                ease: 'Quad.out'
+            });
         });
 
         // A cena escuta este evento para reiniciar (respawn) após a animação.

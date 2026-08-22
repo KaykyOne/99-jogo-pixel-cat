@@ -25,7 +25,10 @@ export const ATTACKS: Record<string, AttackDefinition> = {
             offsetY: 6,
             width: 50,
             height: 66,
-            activeStartFrame: 3,
+            // Janela ativa reduzida de 3 frames (300ms) para 2 frames (200ms, frames 4-5)
+            // para aumentar peso e precisão do golpe. Frame 4 é o pico visual do impacto.
+            // Antes: 3-5 (generoso, 50% da animação). Agora: 4-5 (preciso, 33%).
+            activeStartFrame: 4,
             activeEndFrame: 5
         }
     }
