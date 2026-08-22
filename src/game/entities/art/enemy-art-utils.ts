@@ -112,3 +112,67 @@ export function registerProjectileArt(
     g.generateTexture(key, size, size);
     g.destroy();
 }
+
+// --- Corpo em duas passadas ------------------------------------------------
+// Sem contorno, um bicho chapado some contra o terreno (a arte anterior tinha
+// exatamente esse problema). A solução clássica de pixel art é uma silhueta
+// escura por baixo, um pouco maior que o desenho.
+//
+// Precisa ser em DUAS passadas — primeiro todos os contornos, depois todos os
+// preenchimentos. Desenhando peça por peça (contorno+preenchimento de cada
+// uma), o contorno da peça seguinte corta a que já estava pintada e o bicho
+// fica riscado por dentro.
+export type Shape =
+    | { kind: 'circle'; x: number; y: number; r: number; color: number }
+    | { kind: 'rect'; x: number; y: number; w: number; h: number; color: number }
+    | { kind: 'tri'; p: [number, number, number, number, number, number]; color: number };
+
+const OUTLINE = 0x171019;
+
+function drawShape(g: GameObjects.Graphics, s: Shape, grow: number, color: number): void {
+    g.fillStyle(color);
+
+    if (s.kind === 'circle') {
+        g.fillCircle(s.x, s.y, s.r + grow);
+        return;
+    }
+
+    if (s.kind === 'rect') {
+        g.fillRect(s.x - grow, s.y - grow, s.w + grow * 2, s.h + grow * 2);
+        return;
+    }
+
+    // Triângulo cresce a partir do próprio centro, para o contorno acompanhar
+    // a forma em vez de deslocá-la.
+    const [x1, y1, x2, y2, x3, y3] = s.p;
+    const cx = (x1 + x2 + x3) / 3;
+    const cy = (y1 + y2 + y3) / 3;
+    const push = (x: number, y: number): [number, number] => {
+        const dx = x - cx;
+        const dy = y - cy;
+        const len = Math.hypot(dx, dy) || 1;
+        return [x + (dx / len) * grow, y + (dy / len) * grow];
+    };
+    const [ax, ay] = push(x1, y1);
+    const [bx, by] = push(x2, y2);
+    const [dx2, dy2] = push(x3, y3);
+    g.fillTriangle(ax, ay, bx, by, dx2, dy2);
+}
+
+// Desenha o corpo inteiro com contorno. `grow` é a espessura do contorno.
+export function drawBody(g: GameObjects.Graphics, shapes: Shape[], grow = 2): void {
+    for (const s of shapes) {
+        drawShape(g, s, grow, OUTLINE);
+    }
+    for (const s of shapes) {
+        drawShape(g, s, 0, s.color);
+    }
+}
+
+// Detalhe pintado por cima do corpo já montado (olho, brilho, listra). Não
+// leva contorno: é o que dá o volume depois que a silhueta está fechada.
+export function detail(g: GameObjects.Graphics, shapes: Shape[]): void {
+    for (const s of shapes) {
+        drawShape(g, s, 0, s.color);
+    }
+}

@@ -1,212 +1,110 @@
-import { Scene } from 'phaser';
+import { GameObjects, Scene } from 'phaser';
 
-import { EnemyPoses, registerEnemyArt } from './enemy-art-utils';
+import { detail, drawBody, EnemyPoses, registerEnemyArt, Shape } from './enemy-art-utils';
 
-// Paleta: aranha escura com detalhes roxos.
-const DARK = 0x2e2438;   // Corpo escuro
-const ACCENT = 0x6b4a8a; // Roxo, detalhes
+// Aranha. Corpo de colisão 26x18, offset 11/26 -> faixa y 26..44. O abdome
+// fica nessa faixa e as pernas descem até o chão do frame.
+const SHELL = 0x3c3050;      // abdome iluminado
+const SHELL_DARK = 0x241c33; // abdome na sombra
+const LEG = 0x6b5590;      // pernas CLARAS de propósito: escuras somem no fundo da caverna
+const LEG_DARK = 0x4a3a68;
+const EYE = 0xff5d7a;        // olhos vermelhos: a leitura de "venenosa"
+const MARK = 0xc94f7c;       // marca no dorso
 
-// Aranha: corpo baixo e largo, 8 pernas (4 de cada lado), olhos.
-// Frame: 48x48. Corpo: x=[11,37), y=[26,44) — altura de 18px na parte de baixo.
+type G = GameObjects.Graphics;
 
-// Pose idle 1: relaxado.
-const idle1 = (g: Phaser.GameObjects.Graphics) => {
-    // Corpo: óvalo baixo e largo.
-    g.fillStyle(DARK).fillEllipse(24, 36, 13, 8);
+// Uma perna em dois segmentos, articulada — reta demais lê como palito.
+// `dir` -1 = lado esquerdo. `spread` afasta a perna do corpo, `lift` sobe o pé.
+function leg(dir: number, index: number, spread: number, lift: number): Shape[] {
+    // Os quadris se espalham ao longo do corpo e os joelhos sobem ACIMA dele:
+    // é esse arco que faz ler como aranha. Antes todas as pernas saíam do
+    // mesmo ponto e se amontoavam num borrão embaixo do abdome.
+    const hipX = 22 + dir * (2 + index * 2);
+    const hipY = 31;
+    // Joelhos bem separados nos dois eixos: agrupados, as oito coxas viravam
+    // um bloco sólido em cima do abdome em vez de oito pernas.
+    const kneeX = 22 + dir * (9 + index * 3.5);
+    const kneeY = 27 - index * 2.5;
+    // Teto de 22px de afastamento: além disso o pé sai do frame de 48 e é
+    // cortado no meio.
+    const footX = 22 + dir * Math.min(12 + index * 3 + spread, 22);
+    const footY = 46 - lift;
 
-    // 8 pernas: 4 de cada lado, ligeiramente diagonais.
-    // Lado esquerdo (esquerda do corpo).
-    g.fillStyle(DARK).fillRect(10, 30, 2, 8);   // Perna 1, superior
-    g.fillStyle(DARK).fillRect(9, 35, 2, 8);    // Perna 2, inferior
-    g.fillStyle(DARK).fillRect(9, 40, 2, 6);    // Perna 3, base
+    return [
+        // Coxa subindo até o "joelho" alto, marca registrada de aranha.
+        { kind: 'tri', p: [hipX, hipY - 1, hipX, hipY + 2, kneeX, kneeY], color: LEG },
+        // Canela descendo ao chão, mais escura para dar profundidade.
+        { kind: 'tri', p: [kneeX - 1.5, kneeY - 1, kneeX + 1.5, kneeY + 1, footX, footY], color: LEG_DARK }
+    ];
+}
 
-    // Lado direito.
-    g.fillStyle(DARK).fillRect(36, 30, 2, 8);   // Perna 5, superior
-    g.fillStyle(DARK).fillRect(37, 35, 2, 8);   // Perna 6, inferior
-    g.fillStyle(DARK).fillRect(37, 40, 2, 6);   // Perna 7, base
+// 4 pernas de cada lado. `phase` alterna quais pares estão levantados.
+function legs(phase: number): Shape[] {
+    const out: Shape[] = [];
+    for (let i = 0; i < 4; i++) {
+        const lift = (i + phase) % 2 === 0 ? 3 : 0;
+        out.push(...leg(-1, i, i, lift), ...leg(1, i, i, (i + phase + 1) % 2 === 0 ? 3 : 0));
+    }
+    return out;
+}
 
-    // Cabeça: círculo pequeno no topo do corpo.
-    g.fillStyle(DARK).fillCircle(24, 26, 4);
+function spider(phase: number, rear: number, fangsOut: boolean): { body: Shape[]; detail: Shape[] } {
+    return {
+        // `rear` levanta a frente do corpo — é o bote.
+        body: [
+            ...legs(phase),
+            // Abdome (bola de trás) e cefalotórax (frente, menor).
+            { kind: 'circle', x: 17, y: 31 - rear * 0.5, r: 8, color: SHELL },
+            { kind: 'circle', x: 28, y: 32 - rear, r: 6, color: SHELL },
+            // Quelíceras.
+            { kind: 'tri', p: [32, 31 - rear, 38, 33 - rear, 32, 35 - rear], color: SHELL_DARK }
+        ],
+        detail: [
+            { kind: 'circle', x: 17, y: 34 - rear * 0.5, r: 5, color: SHELL_DARK },
+            // Marca em ampulheta no dorso.
+            { kind: 'tri', p: [17, 26 - rear * 0.5, 14, 31 - rear * 0.5, 20, 31 - rear * 0.5], color: MARK },
+            // Quatro olhos em duas fileiras, como aranha de verdade.
+            { kind: 'circle', x: 29, y: 29 - rear, r: 1.4, color: EYE },
+            { kind: 'circle', x: 32, y: 30 - rear, r: 1.1, color: EYE },
+            { kind: 'circle', x: 29, y: 33 - rear, r: 1.1, color: EYE },
+            { kind: 'circle', x: 32, y: 34 - rear, r: 0.9, color: EYE },
+            ...(fangsOut
+                ? [
+                      { kind: 'tri', p: [35, 32 - rear, 42, 34 - rear, 35, 35 - rear], color: EYE } as Shape
+                  ]
+                : [])
+        ]
+    };
+}
 
-    // Olhos: dois pontos roxos.
-    g.fillStyle(ACCENT).fillCircle(22, 25, 1);
-    g.fillStyle(ACCENT).fillCircle(26, 25, 1);
-};
+function pose(phase: number, rear: number, fangsOut: boolean): (g: G) => void {
+    const parts = spider(phase, rear, fangsOut);
+    return g => {
+        drawBody(g, parts.body, 1);
+        detail(g, parts.detail);
+    };
+}
 
-// Pose idle 2: respiração, corpo ligeiramente diferente.
-const idle2 = (g: Phaser.GameObjects.Graphics) => {
-    g.fillStyle(DARK).fillEllipse(24, 35, 13, 9);
+const idle1 = pose(0, 0, false);
+const idle2 = pose(1, 0, false);
 
-    g.fillStyle(DARK).fillRect(10, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 34, 2, 9);
-    g.fillStyle(DARK).fillRect(9, 40, 2, 6);
+// Corrida: as pernas alternam em dois tempos, e o corpo sobe/desce 1px junto.
+const walk1 = pose(0, 0, false);
+const walk2 = pose(1, 1, false);
+const walk3 = pose(0, 0, false);
+const walk4 = pose(1, 1, false);
 
-    g.fillStyle(DARK).fillRect(36, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 34, 2, 9);
-    g.fillStyle(DARK).fillRect(37, 40, 2, 6);
-
-    g.fillStyle(DARK).fillCircle(24, 26, 4);
-    g.fillStyle(ACCENT).fillCircle(22, 25, 1);
-    g.fillStyle(ACCENT).fillCircle(26, 25, 1);
-};
-
-// Walk 1: perna esquerda 1 levantada.
-const walk1 = (g: Phaser.GameObjects.Graphics) => {
-    g.fillStyle(DARK).fillEllipse(24, 36, 13, 8);
-
-    g.fillStyle(DARK).fillRect(10, 28, 2, 10); // Levantada
-    g.fillStyle(DARK).fillRect(9, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 40, 2, 6);
-
-    g.fillStyle(DARK).fillRect(36, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 40, 2, 6);
-
-    g.fillStyle(DARK).fillCircle(24, 26, 4);
-    g.fillStyle(ACCENT).fillCircle(22, 25, 1);
-    g.fillStyle(ACCENT).fillCircle(26, 25, 1);
-};
-
-// Walk 2: perna esquerda 2 levantada.
-const walk2 = (g: Phaser.GameObjects.Graphics) => {
-    g.fillStyle(DARK).fillEllipse(24, 35, 13, 9);
-
-    g.fillStyle(DARK).fillRect(10, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 33, 2, 10); // Levantada
-    g.fillStyle(DARK).fillRect(9, 40, 2, 6);
-
-    g.fillStyle(DARK).fillRect(36, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 40, 2, 6);
-
-    g.fillStyle(DARK).fillCircle(24, 26, 4);
-    g.fillStyle(ACCENT).fillCircle(22, 25, 1);
-    g.fillStyle(ACCENT).fillCircle(26, 25, 1);
-};
-
-// Walk 3: perna direita 1 levantada.
-const walk3 = (g: Phaser.GameObjects.Graphics) => {
-    g.fillStyle(DARK).fillEllipse(24, 36, 13, 8);
-
-    g.fillStyle(DARK).fillRect(10, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 40, 2, 6);
-
-    g.fillStyle(DARK).fillRect(36, 28, 2, 10); // Levantada
-    g.fillStyle(DARK).fillRect(37, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 40, 2, 6);
-
-    g.fillStyle(DARK).fillCircle(24, 26, 4);
-    g.fillStyle(ACCENT).fillCircle(22, 25, 1);
-    g.fillStyle(ACCENT).fillCircle(26, 25, 1);
-};
-
-// Walk 4: perna direita 2 levantada.
-const walk4 = (g: Phaser.GameObjects.Graphics) => {
-    g.fillStyle(DARK).fillEllipse(24, 35, 13, 9);
-
-    g.fillStyle(DARK).fillRect(10, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 40, 2, 6);
-
-    g.fillStyle(DARK).fillRect(36, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 33, 2, 10); // Levantada
-    g.fillStyle(DARK).fillRect(37, 40, 2, 6);
-
-    g.fillStyle(DARK).fillCircle(24, 26, 4);
-    g.fillStyle(ACCENT).fillCircle(22, 25, 1);
-    g.fillStyle(ACCENT).fillCircle(26, 25, 1);
-};
-
-// Attack 1 (teia): cabeça baixada, preparação.
-const attack1 = (g: Phaser.GameObjects.Graphics) => {
-    g.fillStyle(DARK).fillEllipse(24, 37, 12, 8);
-
-    g.fillStyle(DARK).fillRect(10, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 40, 2, 6);
-
-    g.fillStyle(DARK).fillRect(36, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 40, 2, 6);
-
-    g.fillStyle(DARK).fillCircle(24, 27, 3);
-    g.fillStyle(ACCENT).fillCircle(22, 26, 1);
-    g.fillStyle(ACCENT).fillCircle(26, 26, 1);
-};
-
-// Attack 2 (teia): corpo contraído, cuspe.
-const attack2 = (g: Phaser.GameObjects.Graphics) => {
-    g.fillStyle(DARK).fillEllipse(24, 37, 11, 7);
-
-    g.fillStyle(DARK).fillRect(10, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 40, 2, 6);
-
-    g.fillStyle(DARK).fillRect(36, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 40, 2, 6);
-
-    g.fillStyle(DARK).fillCircle(24, 28, 3);
-    g.fillStyle(ACCENT).fillCircle(22, 27, 1);
-    g.fillStyle(ACCENT).fillCircle(26, 27, 1);
-};
-
-// Attack 3 (teia): MID-POINT. Teia disparada, corpo contraído.
-const attack3 = (g: Phaser.GameObjects.Graphics) => {
-    g.fillStyle(DARK).fillEllipse(24, 37, 10, 7);
-
-    g.fillStyle(DARK).fillRect(10, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 40, 2, 6);
-
-    g.fillStyle(DARK).fillRect(36, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 40, 2, 6);
-
-    g.fillStyle(DARK).fillCircle(24, 28, 3);
-    g.fillStyle(ACCENT).fillCircle(22, 27, 1);
-    g.fillStyle(ACCENT).fillCircle(26, 27, 1);
-};
-
-// Attack 4 (bote): corpo expandido, pernas tensionadas.
-const attack4 = (g: Phaser.GameObjects.Graphics) => {
-    g.fillStyle(DARK).fillEllipse(24, 36, 14, 9);
-
-    g.fillStyle(DARK).fillRect(10, 28, 2, 10);
-    g.fillStyle(DARK).fillRect(9, 34, 2, 9);
-    g.fillStyle(DARK).fillRect(9, 40, 2, 6);
-
-    g.fillStyle(DARK).fillRect(36, 28, 2, 10);
-    g.fillStyle(DARK).fillRect(37, 34, 2, 9);
-    g.fillStyle(DARK).fillRect(37, 40, 2, 6);
-
-    g.fillStyle(DARK).fillCircle(24, 26, 4);
-    g.fillStyle(ACCENT).fillCircle(22, 25, 1);
-    g.fillStyle(ACCENT).fillCircle(26, 25, 1);
-};
-
-// Attack 5: recuperação, voltando ao normal.
-const attack5 = (g: Phaser.GameObjects.Graphics) => {
-    g.fillStyle(DARK).fillEllipse(24, 35, 13, 8);
-
-    g.fillStyle(DARK).fillRect(10, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(9, 40, 2, 6);
-
-    g.fillStyle(DARK).fillRect(36, 30, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 35, 2, 8);
-    g.fillStyle(DARK).fillRect(37, 40, 2, 6);
-
-    g.fillStyle(DARK).fillCircle(24, 26, 4);
-    g.fillStyle(ACCENT).fillCircle(22, 25, 1);
-    g.fillStyle(ACCENT).fillCircle(26, 25, 1);
-};
+// Ataque: recua, empina a frente e dá o bote com as presas à mostra.
+const atk1 = pose(0, -1, false);
+const atk2 = pose(1, 3, false);
+const atk3 = pose(0, 4, true);
+const atk4 = pose(1, 1, true);
+const atk5 = pose(0, 0, false);
 
 const POSES: EnemyPoses = {
     idle: [idle1, idle2],
     walk: [walk1, walk2, walk3, walk4],
-    attack: [attack1, attack2, attack3, attack4, attack5]
+    attack: [atk1, atk2, atk3, atk4, atk5]
 };
 
 export function registerSpiderArt(scene: Scene): void {
