@@ -7,6 +7,7 @@ import { EnemyType, ENEMY_STATS } from '../damage/health-config';
 import { isPathBlocked } from '../world/line-of-sight';
 import { Player } from './Player';
 import { syncFacingOffset } from './physics-utils';
+import { PLAYER_PARRY } from './player-config';
 
 export type EnemyState = 'patrol' | 'chase' | 'attack' | 'hurt' | 'dead';
 
@@ -198,6 +199,28 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
         return damage;
     }
 
+    // Reação a um golpe DEFENDIDO pelo jogador (parry, tecla Q): a mesma
+    // reação visual de dano, mas sem tirar vida, mais uma janela sem poder
+    // atacar. Ignora de propósito isDamageImmune(): defender é justamente a
+    // resposta ao ouriço enrolado, que nenhum golpe machuca.
+    stagger(durationMs: number): void {
+        if (this.enemyState === 'dead') {
+            return;
+        }
+
+        this.enemyState = 'hurt';
+        this.hurtTimer = 220;
+        this.attackCooldownUntil = this.scene.time.now + durationMs;
+
+        // Recuo na direção contrária ao jogador, para a defesa abrir espaço.
+        const away = this.x >= this.target.x ? 1 : -1;
+        this.arcadeBody.setVelocity(PLAYER_PARRY.staggerKnockbackX * away, PLAYER_PARRY.staggerKnockbackY);
+
+        this.setTint(0xfff2a8);
+        this.setTintFill();
+        this.play(`${this.typeKey}-idle`, true);
+    }
+
     protected get arcadeBody(): Physics.Arcade.Body {
         return this.body as Physics.Arcade.Body;
     }
@@ -314,7 +337,7 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
                 knockbackY: this.stats.combat.knockbackY
             };
 
-            this.target.takeDamage(source, direction);
+            this.target.takeDamage(source, direction, this);
         });
     }
 

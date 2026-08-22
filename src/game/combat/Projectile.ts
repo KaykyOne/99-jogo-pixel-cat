@@ -3,6 +3,7 @@ import { Physics, Scene } from 'phaser';
 import { DamageSource } from '../damage/damage';
 import { EnemyProjectile } from '../damage/health-config';
 import { Player } from '../entities/Player';
+import { Parryable } from '../entities/PlayerParry';
 
 // Projétil disparado por um inimigo. Serve tanto para a cusparada da lhama
 // (com gravidade, arco) quanto para a teia da aranha (reta, sem dano real mas
@@ -10,6 +11,9 @@ import { Player } from '../entities/Player';
 export class Projectile extends Physics.Arcade.Sprite {
     readonly config: EnemyProjectile;
     readonly damage: DamageSource;
+    // Quem atirou, para o parry poder revidar em quem disparou. Opcional
+    // porque o atirador pode ter morrido antes do tiro chegar.
+    readonly owner?: Parryable;
 
     private expiresAt: number;
 
@@ -19,12 +23,14 @@ export class Projectile extends Physics.Arcade.Sprite {
         y: number,
         directionX: number,
         config: EnemyProjectile,
-        damage: DamageSource
+        damage: DamageSource,
+        owner?: Parryable
     ) {
         super(scene, x, y, config.textureKey);
 
         this.config = config;
         this.damage = damage;
+        this.owner = owner;
 
         scene.add.existing(this);
         scene.physics.add.existing(this);
@@ -67,9 +73,10 @@ export class ProjectileManager {
         y: number,
         directionX: number,
         config: EnemyProjectile,
-        damage: DamageSource
+        damage: DamageSource,
+        owner?: Parryable
     ): Projectile {
-        const projectile = new Projectile(this.scene, x, y, directionX, config, damage);
+        const projectile = new Projectile(this.scene, x, y, directionX, config, damage, owner);
 
         // Bater numa plataforma sólida consome o tiro. Sem isto o projétil
         // atravessaria o monte e acertaria quem está atrás dele — o mesmo
@@ -101,10 +108,14 @@ export class ProjectileManager {
                 }
 
                 const direction = this.player.x >= projectile.x ? 1 : -1;
-                this.player.takeDamage(projectile.damage, direction);
+                const tookDamage = this.player.takeDamage(projectile.damage, direction, projectile.owner);
 
+                // A lentidão da teia só cola se o tiro NÃO foi defendido —
+                // senão defender anularia o dano mas o jogador sairia lento
+                // do mesmo jeito, o que tornaria a defesa quase inútil contra
+                // a aranha.
                 const { slowFactor, slowDurationMs } = projectile.config;
-                if (slowFactor !== undefined && slowDurationMs !== undefined) {
+                if (tookDamage && slowFactor !== undefined && slowDurationMs !== undefined) {
                     this.player.applySlow(slowFactor, slowDurationMs);
                 }
 

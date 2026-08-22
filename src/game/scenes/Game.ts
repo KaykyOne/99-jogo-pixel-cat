@@ -338,44 +338,44 @@ export class PhaseScene extends Scene {
         // queda usada pelos spawns do chão.
         const spawns: Record<string, EnemySpawn[]> = {
             forest: [
-                { type: 'graverobber', x: 500, minX: 300, maxX: 700 },
-                // Bando de aranhas no trecho aberto antes do vão longo.
-                { type: 'spider', x: 1380, minX: 1310, maxX: 1490, count: 3 },
+                { type: 'spider', x: 500, minX: 300, maxX: 700, count: 2 },
                 // Sobre o degrau de 1 STEP (x 760..980, topo 284).
-                { type: 'graverobber', x: 870, y: 204, minX: 800, maxX: 940 },
+                { type: 'hedgehog', x: 870, y: 204, minX: 800, maxX: 940 },
+                // Bando no trecho aberto antes do vão longo.
+                { type: 'spider', x: 1380, minX: 1310, maxX: 1490, count: 3 },
                 // Sobre o monte de 1 STEP após o vão longo (x 1500..1680, topo 284).
-                { type: 'graverobber', x: 1590, y: 204, minX: 1540, maxX: 1640 }
+                { type: 'llama', x: 1590, y: 204, minX: 1540, maxX: 1640 }
             ],
             desert: [
-                { type: 'steamman', x: 450, minX: 250, maxX: 650 },
-                // A lhama abre o deserto: obriga a aprender a fechar distância
-                // contra quem atira e recua.
+                { type: 'hedgehog', x: 450, minX: 250, maxX: 650 },
+                // A lhama define o deserto: obriga a aprender a fechar
+                // distância contra quem atira e recua.
                 { type: 'llama', x: 1400, minX: 1280, maxX: 1820 },
-                { type: 'llama', x: 2300, minX: 2040, maxX: 2540 }
+                { type: 'llama', x: 2400, minX: 2300, maxX: 2520 }
             ],
             snow: [
-                { type: 'graverobber', x: 400, minX: 220, maxX: 600 },
+                { type: 'spider', x: 400, minX: 220, maxX: 600, count: 2 },
                 { type: 'hedgehog', x: 1420, minX: 1240, maxX: 1740 },
-                { type: 'llama', x: 2250, minX: 2020, maxX: 2500 }
+                { type: 'llama', x: 2400, minX: 2300, maxX: 2520 }
             ],
             cave: [
                 // Caverna é o território do morcego e da aranha.
                 { type: 'bat', x: 500, y: BAT_FLIGHT_Y, minX: 260, maxX: 760 },
                 { type: 'bat', x: 1400, y: BAT_FLIGHT_Y, minX: 1160, maxX: 1680 },
                 { type: 'spider', x: 1420, minX: 1180, maxX: 1660, count: 4 },
-                { type: 'steamman', x: 2400, minX: 2280, maxX: 2520 }
+                { type: 'hedgehog', x: 2400, minX: 2280, maxX: 2520 }
             ],
             volcano: [
-                { type: 'steamman', x: 400, minX: 220, maxX: 620 },
+                { type: 'llama', x: 400, minX: 220, maxX: 620 },
                 { type: 'hedgehog', x: 1150, minX: 980, maxX: 1340 },
                 { type: 'bat', x: 2200, y: BAT_FLIGHT_Y, minX: 2020, maxX: 2460 }
             ],
             ruins: [
-                { type: 'graverobber', x: 400, minX: 220, maxX: 600 },
+                { type: 'spider', x: 400, minX: 220, maxX: 600, count: 3 },
                 { type: 'llama', x: 1300, minX: 1220, maxX: 1700 },
                 { type: 'bat', x: 1450, y: BAT_FLIGHT_Y, minX: 1200, maxX: 1740 },
                 // Sobre o degrau de 1 STEP (x 1760..2000, topo 284).
-                { type: 'steamman', x: 1880, y: 204, minX: 1800, maxX: 1960 }
+                { type: 'hedgehog', x: 1880, y: 204, minX: 1800, maxX: 1960 }
             ]
         };
 
@@ -409,12 +409,12 @@ export class PhaseScene extends Scene {
 
     private spawnBoss() {
         const bossByPhase: Record<string, BossType> = {
-            forest: 'graverobber',
-            desert: 'steamman',
-            snow: 'graverobber',
-            cave: 'steamman',
-            volcano: 'steamman',
-            ruins: 'graverobber'
+            forest: 'spider',
+            desert: 'llama',
+            snow: 'hedgehog',
+            cave: 'spider',
+            volcano: 'hedgehog',
+            ruins: 'llama'
         };
 
         const type = bossByPhase[this.phase.key];
@@ -481,7 +481,9 @@ export class PhaseScene extends Scene {
         }
 
         const direction = this.player.x >= enemy.x ? 1 : -1;
-        this.player.takeDamage(enemy.contactDamage, direction);
+        // Passa o inimigo como atacante: defender no instante em que ele
+        // encosta também deve revidar, não só contra o golpe deliberado.
+        this.player.takeDamage(enemy.contactDamage, direction, enemy);
     }
 
     // Reinicia a fase após a morte do jogador, com um breve fade-out.
@@ -670,7 +672,7 @@ export class PhaseScene extends Scene {
             .setScrollFactor(0);
 
         this.controlsText = this.add
-            .text(this.scale.width - 44, 30, 'A/D mover  ·  W pular  ·  F atacar  ·  Espaço dash  ·  A/D na parede + W/S escalar', {
+            .text(this.scale.width - 44, 30, 'A/D mover  ·  W pular  ·  F atacar  ·  Q defender  ·  Espaço dash  ·  A/D na parede + W/S escalar', {
                 fontFamily: 'monospace',
                 fontSize: '11px',
                 color: '#c0d9b1'

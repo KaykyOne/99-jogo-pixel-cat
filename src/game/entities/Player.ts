@@ -7,10 +7,12 @@ import { PLAYER_HEALTH } from '../damage/health-config';
 import { PLAYER_BODY, PLAYER_MOVEMENT } from './player-config';
 import { PlayerClimb } from './PlayerClimb';
 import { PlayerDash } from './PlayerDash';
+import { Parryable, PlayerParry } from './PlayerParry';
 import { syncFacingOffset } from './physics-utils';
 
 type PlayerKeys = {
     attack: Input.Keyboard.Key;
+    parry: Input.Keyboard.Key;
     dash: Input.Keyboard.Key;
     right: Input.Keyboard.Key;
     left: Input.Keyboard.Key;
@@ -26,6 +28,7 @@ export class Player extends Physics.Arcade.Sprite {
     readonly combat: PlayerCombat;
     readonly dash: PlayerDash;
     readonly climb: PlayerClimb;
+    readonly parry: PlayerParry;
 
     private keys: PlayerKeys;
 
@@ -76,9 +79,11 @@ export class Player extends Physics.Arcade.Sprite {
         this.combat = new PlayerCombat(scene, this);
         this.dash = new PlayerDash(scene, this);
         this.climb = new PlayerClimb(this);
+        this.parry = new PlayerParry(scene, this);
 
         this.keys = scene.input.keyboard!.addKeys({
             attack: Input.Keyboard.KeyCodes.F,
+            parry: Input.Keyboard.KeyCodes.Q,
             dash: Input.Keyboard.KeyCodes.SPACE,
 
             right: Input.Keyboard.KeyCodes.D,
@@ -130,6 +135,7 @@ export class Player extends Physics.Arcade.Sprite {
             (this.keys.up.isDown ? -1 : 0) + (this.keys.down.isDown ? 1 : 0);
 
         this.updateTimers(delta, onGround);
+        this.parry.update(time);
         this.dash.update(time);
         // O dash controla o corpo inteiro (inclusive a gravidade) enquanto dura.
         if (!this.dash.isDashing) {
@@ -150,7 +156,24 @@ export class Player extends Physics.Arcade.Sprite {
             }
         }
 
-        if (this.climb.isGripping) {
+        // Q defende. Só do chão e fora de qualquer outra ação: no ar ou no
+        // meio de um golpe a defesa viraria um cancelamento universal.
+        if (
+            this.hurtTimer <= 0 &&
+            onGround &&
+            !this.dash.isDashing &&
+            !this.climb.isGripping &&
+            !this.combat.isAttacking &&
+            Input.Keyboard.JustDown(this.keys.parry)
+        ) {
+            this.parry.attempt(time);
+        }
+
+        if (this.parry.isBusy) {
+            // Defendendo: plantado, sem atacar e sem pular.
+            this.jumpBufferTimer = 0;
+            this.coyoteTimer = 0;
+        } else if (this.climb.isGripping) {
             // W está sendo usado para subir, não para pular. Zerar as janelas
             // evita que o pulo saia sozinho no instante em que soltar a parede.
             this.jumpBufferTimer = 0;
@@ -162,6 +185,9 @@ export class Player extends Physics.Arcade.Sprite {
 
         if (this.dash.isDashing) {
             // PlayerDash controla a velocidade horizontal durante o impulso.
+        } else if (this.parry.isBusy) {
+            // Defesa prende o jogador no lugar, encarando a direção atual.
+            this.setVelocityX(0);
         } else if (this.climb.isGripping) {
             // PlayerClimb controla os dois eixos; aqui só encara a parede.
             this.setFlipX(this.climb.touchingWallDirection < 0);
@@ -213,8 +239,17 @@ export class Player extends Physics.Arcade.Sprite {
 
     // Aplica dano ao jogador. Retorna true se o dano foi efetivamente recebido.
     // `direction` (1 = direita, -1 = esquerda) indica o sentido do recuo.
-    takeDamage(source: DamageSource, direction: number): boolean {
+    takeDamage(source: DamageSource, direction: number, attacker?: Parryable): boolean {
         if (this.playerState === 'dead') {
+            return false;
+        }
+
+        // Defesa ativa: o dano é anulado por inteiro e quem atacou leva o
+        // revide (reação de dano, sem perder vida, e sem atacar por 2s).
+        // Vem ANTES dos i-frames: defender com sucesso não deve consumir a
+        // invencibilidade que o jogador ainda pode precisar.
+        if (this.parry.isActive) {
+            this.parry.absorb(attacker);
             return false;
         }
 
@@ -417,6 +452,12 @@ export class Player extends Physics.Arcade.Sprite {
             return;
         }
 
+        // A defesa congela o próprio frame; deixar o idle/walk voltar por cima
+        // apagaria a pose e o tint que sinalizam que ele está protegido.
+        if (this.parry.isBusy) {
+            return;
+        }
+
         // Mantém o frame de dano durante o hitstun.
         if (this.hurtTimer > 0) {
             return;
@@ -458,6 +499,8 @@ export class Player extends Physics.Arcade.Sprite {
     private die(source: DamageSource, direction: number) {
         this.playerState = 'dead';
         this.setControlsEnabled(false);
+        this.parry.cancel();
+        this.combat.cancel();
 
         this.setAlpha(1);
         this.clearTint();

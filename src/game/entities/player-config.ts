@@ -54,3 +54,22 @@ export const PLAYER_CLIMB = {
     // PlayerClimb). ~1px por frame, anulado pela separação do collider.
     wallStickSpeed: 60
 } as const;
+
+// Parry (tecla Q). A janela ativa é curta de propósito: defender precisa ser
+// uma leitura do golpe do inimigo, não um botão de segurar. O cooldown impede
+// que dê para martelar Q e ficar invulnerável.
+export const PLAYER_PARRY = {
+    // Quanto tempo a defesa fica valendo depois do toque.
+    activeMs: 280,
+    // Tempo travado depois da janela, tenha acertado ou não. É o risco de
+    // errar o tempo: quem defende cedo demais fica exposto.
+    recoveryMs: 220,
+    cooldownMs: 900,
+
+    // Quanto tempo o inimigo defendido fica sem atacar. Pedido do design: 2s.
+    staggerMs: 2000,
+
+    // Recuo aplicado a quem teve o golpe defendido.
+    staggerKnockbackX: 260,
+    staggerKnockbackY: -180
+} as const;

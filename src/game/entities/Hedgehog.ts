@@ -73,6 +73,20 @@ export class Hedgehog extends BaseEnemy {
         return this.hedgehogState === 'curling' || this.hedgehogState === 'rolling';
     }
 
+    // Ser defendido quebra a bola na hora: ele desenrola e entra na janela
+    // vulnerável. Sem isto, o parry marcaria o cooldown mas o ouriço seguiria
+    // rolando imune, e a defesa não teria servido para nada justamente contra
+    // o inimigo em que ela mais importa.
+    stagger(durationMs: number): void {
+        super.stagger(durationMs);
+
+        this.hedgehogState = 'unrolling';
+        this.stateTimer = 0;
+        this.rollsCompleted = 0;
+        this.damageAppliedThisPass = false;
+        this.setRotation(0);
+    }
+
     protected updatePatrol(delta: number): void {
         // Patrulha normal (herança do BaseEnemy). Ao ficar à toa, o ouriço continua
         // andando, não fica parado esperando. O ataque vem só quando persegue ou

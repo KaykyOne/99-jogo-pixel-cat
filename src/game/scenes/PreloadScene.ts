@@ -53,17 +53,6 @@ export class PreloadScene extends Scene {
         this.load.spritesheet('player-hurt', 'player/hurt.png', { frameWidth: 48, frameHeight: 48 });
         this.load.spritesheet('player-death', 'player/death.png', { frameWidth: 48, frameHeight: 48 });
 
-        this.load.spritesheet('graverobber-idle', 'enemies/graverobber-idle.png', { frameWidth: 48, frameHeight: 48 });
-        this.load.spritesheet('graverobber-walk', 'enemies/graverobber-walk.png', { frameWidth: 48, frameHeight: 48 });
-        this.load.spritesheet('graverobber-attack-1', 'enemies/GraveRobber_attack1.png', { frameWidth: 48, frameHeight: 48 });
-        this.load.spritesheet('graverobber-attack-2', 'enemies/GraveRobber_attack2.png', { frameWidth: 48, frameHeight: 48 });
-        this.load.spritesheet('graverobber-attack-3', 'enemies/GraveRobber_attack3.png', { frameWidth: 48, frameHeight: 48 });
-
-        this.load.spritesheet('steamman-idle', 'enemies/steamman-idle.png', { frameWidth: 48, frameHeight: 48 });
-        this.load.spritesheet('steamman-walk', 'enemies/steamman-walk.png', { frameWidth: 48, frameHeight: 48 });
-        this.load.spritesheet('steamman-attack-1', 'enemies/SteamMan_attack1.png', { frameWidth: 48, frameHeight: 48 });
-        this.load.spritesheet('steamman-attack-2', 'enemies/SteamMan_attack2.png', { frameWidth: 48, frameHeight: 48 });
-        this.load.spritesheet('steamman-attack-3', 'enemies/SteamMan_attack3.png', { frameWidth: 48, frameHeight: 48 });
     }
 
     create() {

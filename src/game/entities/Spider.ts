@@ -135,7 +135,8 @@ export class Spider extends BaseEnemy {
                     knockbackX: this.stats.combat.knockbackX,
                     knockbackY: this.stats.combat.knockbackY
                 },
-                direction
+                direction,
+                this
             );
         });
     }
@@ -169,7 +170,7 @@ export class Spider extends BaseEnemy {
                 kind: this.stats.combat.kind,
                 knockbackX: this.stats.combat.knockbackX,
                 knockbackY: this.stats.combat.knockbackY
-            });
+            }, this);
         });
     }
 }

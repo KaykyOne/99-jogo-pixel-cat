@@ -112,7 +112,7 @@ export class Llama extends BaseEnemy {
                 kind: this.stats.combat.kind,
                 knockbackX: this.stats.combat.knockbackX,
                 knockbackY: this.stats.combat.knockbackY
-            });
+            }, this);
         });
     }
 }

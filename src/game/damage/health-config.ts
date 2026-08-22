@@ -58,69 +58,6 @@ export type EnemyProjectile = {
 // resistência, corpo físico e o comportamento de perseguição/ataque, pronto
 // para novos inimigos com valores distintos sem tocar no BaseEnemy.
 const ENEMY_STATS_TABLE = {
-    graverobber: {
-        hp: 3,
-        defense: 0,
-        resistance: {},
-
-        patrolSpeed: 80,
-
-        // Dano de contato passivo: fallback para quando o jogador esbarra no
-        // inimigo fora do golpe deliberado (ex.: durante a perseguição).
-        contactDamage: {
-            amount: 1,
-            kind: 'physical',
-            knockbackX: 200,
-            knockbackY: -200
-        } satisfies DamageSource,
-
-        combat: {
-            amount: 1,
-            kind: 'physical',
-            knockbackX: 200,
-            knockbackY: -200,
-            aggroRange: 260,
-            attackRange: 50,
-            // Precisa ficar ACIMA da altura máxima de pulo (137px) para o
-            // inimigo não perder o alvo toda vez que o jogador pula na frente
-            // dele, e ABAIXO do espaçamento entre saliências (200px) para não
-            // alcançar quem está noutro nível. 150 fica nessa folga.
-            verticalRange: 150,
-            chaseSpeed: 130,
-            cooldownMs: 850
-        } satisfies EnemyCombat,
-
-        body: { width: 20, height: 33, offsetX: 5, offsetY: 15 } satisfies EnemyBody
-    },
-    steamman: {
-        hp: 5,
-        defense: 1,
-        resistance: { fire: 0.5 },
-
-        patrolSpeed: 70,
-
-        contactDamage: {
-            amount: 2,
-            kind: 'physical',
-            knockbackX: 260,
-            knockbackY: -240
-        } satisfies DamageSource,
-
-        combat: {
-            amount: 2,
-            kind: 'physical',
-            knockbackX: 260,
-            knockbackY: -240,
-            aggroRange: 220,
-            attackRange: 55,
-            verticalRange: 150,
-            chaseSpeed: 95,
-            cooldownMs: 1100
-        } satisfies EnemyCombat,
-
-        body: { width: 21, height: 36, offsetX: 3, offsetY: 12 } satisfies EnemyBody
-    },
-
     // --- Os quatro inimigos base novos -------------------------------------
     // Todos usam textura gerada por Graphics (48x48, ver entities/art/), então
     // o corpo é medido contra o desenho de cada um, não contra um spritesheet.
@@ -281,40 +218,59 @@ const ENEMY_STATS_TABLE = {
 export const ENEMY_STATS = ENEMY_STATS_TABLE;
 export type EnemyType = keyof typeof ENEMY_STATS_TABLE;
 
-// Só os dois inimigos com spritesheet completo viram boss. Os quatro novos
-// têm comportamento próprio demais (voa, rola, atira, anda em bando) para
-// funcionarem só ampliados 5x — virariam um boss quebrado, não um boss.
-export type BossType = 'graverobber' | 'steamman';
+// Bosses reaproveitam a arte e o corpo de um inimigo comum, ampliados em 5x
+// (ver Boss.ts), com vida e combate próprios. O morcego fica de fora: sem
+// gravidade e mergulhando em escala 5, ele não caberia na arena nem daria uma
+// luta legível.
+export type BossType = 'llama' | 'hedgehog' | 'spider';
 
-// Variantes de boss: reutilizam arte e corpo dos inimigos comuns, mas com
-// vida e comportamento de combate próprios.
 export const BOSS_STATS: Record<BossType, typeof ENEMY_STATS[BossType]> = {
-    graverobber: {
-        ...ENEMY_STATS.graverobber,
+    // Artilharia: muita vida, tiro rápido, e o recuo característico vira o
+    // problema central da luta — é preciso encurralá-la.
+    llama: {
+        ...ENEMY_STATS.llama,
+        hp: 45,
+        defense: 1,
+        combat: {
+            ...ENEMY_STATS.llama.combat,
+            amount: 2,
+            aggroRange: 620,
+            attackRange: 520,
+            verticalRange: 180,
+            cooldownMs: 900
+        }
+    },
+
+    // Vida BAIXA para um boss de propósito: ele é imune enquanto rola, então a
+    // janela real de dano é só o desenrolar. Com vida de boss comum a luta
+    // viraria uma espera de vários minutos.
+    hedgehog: {
+        ...ENEMY_STATS.hedgehog,
+        hp: 22,
+        defense: 1,
+        combat: {
+            ...ENEMY_STATS.hedgehog.combat,
+            amount: 3,
+            aggroRange: 520,
+            attackRange: 420,
+            verticalRange: 180,
+            cooldownMs: 1600
+        }
+    },
+
+    // A aranha comum tem 1 de vida; como boss ela vira o oposto: aguenta
+    // bastante e alterna teia e bote sem descanso.
+    spider: {
+        ...ENEMY_STATS.spider,
         hp: 40,
         defense: 1,
         combat: {
-            ...ENEMY_STATS.graverobber.combat,
+            ...ENEMY_STATS.spider.combat,
             amount: 2,
-            aggroRange: 420,
-            attackRange: 70,
-            // O boss usa escala 5 (170px de altura), então o alcance vertical
-            // acompanha o próprio corpo em vez de herdar o do inimigo comum.
+            aggroRange: 560,
+            attackRange: 420,
             verticalRange: 180,
-            cooldownMs: 650
-        }
-    },
-    steamman: {
-        ...ENEMY_STATS.steamman,
-        hp: 60,
-        defense: 2,
-        combat: {
-            ...ENEMY_STATS.steamman.combat,
-            amount: 3,
-            aggroRange: 380,
-            attackRange: 75,
-            verticalRange: 180,
-            cooldownMs: 900
+            cooldownMs: 1000
         }
     }
 };

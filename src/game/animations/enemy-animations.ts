@@ -1,44 +1,14 @@
 import { Scene } from 'phaser';
 
-import { EnemyType } from '../damage/health-config';
 import { registerBatArt } from '../entities/art/bat-art';
 import { registerHedgehogArt } from '../entities/art/hedgehog-art';
 import { registerLlamaArt } from '../entities/art/llama-art';
 import { registerProjectileArt } from '../entities/art/enemy-art-utils';
 import { registerSpiderArt } from '../entities/art/spider-art';
 
-// Inimigos com spritesheet de verdade em public/assets/enemies. Os quatro
-// novos (lhama, morcego, ouriço, aranha) não têm arte pronta e são desenhados
-// por Graphics em entities/art/ — ver registerGeneratedEnemyArt abaixo.
-const SPRITESHEET_KINDS: EnemyType[] = ['graverobber', 'steamman'];
-
+// Todo inimigo do jogo é desenhado por Graphics em entities/art/ — não há
+// mais nenhum carregado de spritesheet.
 export function createEnemyAnimations(scene: Scene): void {
-    for (const kind of SPRITESHEET_KINDS) {
-        scene.anims.create({
-            key: `${kind}-idle`,
-            frames: scene.anims.generateFrameNumbers(`${kind}-idle`, { start: 0, end: 3 }),
-            frameRate: 4,
-            repeat: -1
-        });
-
-        scene.anims.create({
-            key: `${kind}-walk`,
-            frames: scene.anims.generateFrameNumbers(`${kind}-walk`, { start: 0, end: 5 }),
-            frameRate: 8,
-            repeat: -1
-        });
-
-        // 3 variantes de golpe (sorteadas a cada ataque, ver attack-variants.ts).
-        for (let variant = 1; variant <= 3; variant++) {
-            scene.anims.create({
-                key: `${kind}-attack-${variant}`,
-                frames: scene.anims.generateFrameNumbers(`${kind}-attack-${variant}`, { start: 0, end: 5 }),
-                frameRate: 10,
-                repeat: 0
-            });
-        }
-    }
-
     registerGeneratedEnemyArt(scene);
 }
 
