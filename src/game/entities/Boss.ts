@@ -1,6 +1,6 @@
 import { GameObjects, Scene } from 'phaser';
 
-import { BOSS_STATS, EnemyType } from '../damage/health-config';
+import { BOSS_STATS, BossType } from '../damage/health-config';
 import { BaseEnemy } from './BaseEnemy';
 import { Player } from './Player';
 
@@ -14,7 +14,7 @@ export class Boss extends BaseEnemy {
     private readonly barBg: GameObjects.Rectangle;
     private readonly barFill: GameObjects.Rectangle;
 
-    constructor(scene: Scene, x: number, y: number, typeKey: EnemyType, target: Player) {
+    constructor(scene: Scene, x: number, y: number, typeKey: BossType, target: Player) {
         super(scene, x, y, typeKey, target, BOSS_STATS[typeKey], 5);
 
         this.barBg = scene.add

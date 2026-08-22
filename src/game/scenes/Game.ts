@@ -1,8 +1,9 @@
 import { GameObjects, Geom, Input, Physics, Scene } from 'phaser';
 
 import { MeleeHitbox } from '../combat/MeleeHitbox';
+import { ProjectileManager } from '../combat/Projectile';
 import { DamageSource } from '../damage/damage';
-import { EnemyType } from '../damage/health-config';
+import { BossType, EnemyType } from '../damage/health-config';
 import { BaseEnemy } from '../entities/BaseEnemy';
 import { Boss } from '../entities/Boss';
 import { createEnemy } from '../entities/enemy-factory';
@@ -41,7 +42,15 @@ type EnemySpawn = {
     y?: number;
     minX?: number;
     maxX?: number;
+    // Quantas unidades nascem neste ponto, espalhadas pela faixa de patrulha.
+    // É o que faz a aranha aparecer em bando. Ausente = 1.
+    count?: number;
 };
+
+// Altura de cruzeiro do morcego. Fica acima do topo de 3 STEPs (o ponto mais
+// alto que o terreno alcança) para ele sobrevoar a fase inteira sem nascer
+// dentro de plataforma nenhuma.
+const BAT_FLIGHT_Y = GROUND_Y - 250;
 
 export class PhaseScene extends Scene {
     private phase: PhaseDefinition;
@@ -71,6 +80,9 @@ export class PhaseScene extends Scene {
     private pausePanelGraphics!: GameObjects.Graphics;
     private pauseTitle!: GameObjects.Text;
     private pauseHint!: GameObjects.Text;
+
+    // Projéteis vivos da fase (cusparada da lhama, teia da aranha).
+    private projectiles!: ProjectileManager;
 
     // Textura espelhada do lago, criada apenas na floresta.
     private lakeReflection?: GameObjects.RenderTexture;
@@ -182,6 +194,11 @@ export class PhaseScene extends Scene {
         });
         this.physics.add.collider(this.player, oneWayColliders, undefined, canLandOnOneWay);
 
+        // Precisa existir ANTES de spawnEnemies: os inimigos que atiram pegam
+        // uma referência dele no construtor.
+        this.projectiles = new ProjectileManager(this, this.player, solidColliders);
+        this.registry.set('projectiles', this.projectiles);
+
         this.spawnEnemies();
         this.spawnBoss();
 
@@ -222,6 +239,7 @@ export class PhaseScene extends Scene {
         this.scale.off('resize', this.repositionResponsiveUI, this);
         this.scale.on('resize', this.repositionResponsiveUI, this);
         this.events.once('shutdown', () => {
+            this.projectiles.destroyAll();
             this.scale.off('resize', this.repositionResponsiveUI, this);
             this.scale.off('resize', this.resizeLakeReflection, this);
         });
@@ -264,6 +282,8 @@ export class PhaseScene extends Scene {
         for (const enemy of this.enemies) {
             enemy.update(time, delta);
         }
+
+        this.projectiles.update();
 
         if (
             !this.phaseCleared &&
@@ -312,6 +332,8 @@ export class PhaseScene extends Scene {
         const spawns: Record<string, EnemySpawn[]> = {
             forest: [
                 { type: 'graverobber', x: 500, minX: 300, maxX: 700 },
+                // Bando de aranhas no trecho aberto antes do vão longo.
+                { type: 'spider', x: 1380, minX: 1310, maxX: 1490, count: 3 },
                 // Sobre o degrau de 1 STEP (x 760..980, topo 284).
                 { type: 'graverobber', x: 870, y: 204, minX: 800, maxX: 940 },
                 // Sobre o monte de 1 STEP após o vão longo (x 1500..1680, topo 284).
@@ -319,23 +341,32 @@ export class PhaseScene extends Scene {
             ],
             desert: [
                 { type: 'steamman', x: 450, minX: 250, maxX: 650 },
-                { type: 'steamman', x: 1520, minX: 1320, maxX: 1780 }
+                // A lhama abre o deserto: obriga a aprender a fechar distância
+                // contra quem atira e recua.
+                { type: 'llama', x: 1400, minX: 1280, maxX: 1820 },
+                { type: 'llama', x: 2300, minX: 2040, maxX: 2540 }
             ],
             snow: [
                 { type: 'graverobber', x: 400, minX: 220, maxX: 600 },
-                { type: 'graverobber', x: 1420, minX: 1240, maxX: 1700 }
+                { type: 'hedgehog', x: 1420, minX: 1240, maxX: 1740 },
+                { type: 'llama', x: 2250, minX: 2020, maxX: 2500 }
             ],
             cave: [
-                { type: 'graverobber', x: 400, minX: 220, maxX: 580 },
-                { type: 'steamman', x: 1400, minX: 1180, maxX: 1660 }
+                // Caverna é o território do morcego e da aranha.
+                { type: 'bat', x: 500, y: BAT_FLIGHT_Y, minX: 260, maxX: 760 },
+                { type: 'bat', x: 1400, y: BAT_FLIGHT_Y, minX: 1160, maxX: 1680 },
+                { type: 'spider', x: 1420, minX: 1180, maxX: 1660, count: 4 },
+                { type: 'steamman', x: 2400, minX: 2280, maxX: 2520 }
             ],
             volcano: [
                 { type: 'steamman', x: 400, minX: 220, maxX: 620 },
-                { type: 'steamman', x: 1150, minX: 980, maxX: 1340 }
+                { type: 'hedgehog', x: 1150, minX: 980, maxX: 1340 },
+                { type: 'bat', x: 2200, y: BAT_FLIGHT_Y, minX: 2020, maxX: 2460 }
             ],
             ruins: [
                 { type: 'graverobber', x: 400, minX: 220, maxX: 600 },
-                { type: 'steamman', x: 1300, minX: 1220, maxX: 1700 },
+                { type: 'llama', x: 1300, minX: 1220, maxX: 1700 },
+                { type: 'bat', x: 1450, y: BAT_FLIGHT_Y, minX: 1200, maxX: 1740 },
                 // Sobre o degrau de 1 STEP (x 1760..2000, topo 284).
                 { type: 'steamman', x: 1880, y: 204, minX: 1800, maxX: 1960 }
             ]
@@ -348,20 +379,29 @@ export class PhaseScene extends Scene {
             // Spawns elevados devem informar minX/maxX conforme a plataforma
             // onde estão, pois a patrulha não detecta bordas automaticamente.
             const y = spawn.y ?? GROUND_Y - 80;
-            const enemy = createEnemy(this, spawn.type, spawn.x, y, this.player);
 
-            enemy.setDepth(15);
+            // Bando (aranhas). Espalha as unidades pela faixa de patrulha em
+            // vez de empilhá-las no mesmo x — nascendo sobrepostas, a
+            // separação do Arcade as arremessa para os lados no primeiro frame.
+            const count = spawn.count ?? 1;
+            const minX = spawn.minX ?? spawn.x - 180;
+            const maxX = spawn.maxX ?? spawn.x + 180;
+            const step = count > 1 ? (maxX - minX) / (count + 1) : 0;
 
-            if (spawn.minX !== undefined && spawn.maxX !== undefined) {
-                enemy.setPatrolRange(spawn.minX, spawn.maxX);
+            for (let index = 0; index < count; index++) {
+                const x = count > 1 ? minX + step * (index + 1) : spawn.x;
+                const enemy = createEnemy(this, spawn.type, x, y, this.player);
+
+                enemy.setDepth(15);
+                enemy.setPatrolRange(minX, maxX);
+
+                this.enemies.push(enemy);
             }
-
-            this.enemies.push(enemy);
         }
     }
 
     private spawnBoss() {
-        const bossByPhase: Record<string, EnemyType> = {
+        const bossByPhase: Record<string, BossType> = {
             forest: 'graverobber',
             desert: 'steamman',
             snow: 'graverobber',

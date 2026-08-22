@@ -22,18 +22,32 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
     protected readonly typeKey: EnemyType;
     protected readonly target: Player;
 
+    // --- Ganchos para subclasses -------------------------------------------
+    // Voador: o corpo nasce sem gravidade e a subclasse controla os dois eixos
+    // (ver Bat). Precisa ser lido no construtor, então é um método e não um
+    // campo: um campo de subclasse ainda não foi inicializado nesse momento.
+    protected isFlying(): boolean {
+        return false;
+    }
+
+    // Enquanto true, takeHit é ignorado por completo — nem dano, nem knockback,
+    // nem piscada. É o ouriço enrolado na bola de espinhos.
+    protected isDamageImmune(): boolean {
+        return false;
+    }
+
     private readonly health: Health;
 
     private enemyState: EnemyState = 'patrol';
-    private direction = 1;
-    private patrolMinX: number;
-    private patrolMaxX: number;
+    protected direction = 1;
+    protected patrolMinX: number;
+    protected patrolMaxX: number;
 
     private isPaused = false;
     private pauseTimer: number;
 
     private hurtTimer = 0;
-    private attackCooldownUntil = 0;
+    protected attackCooldownUntil = 0;
 
     // Garante que o inimigo não receba mais de um dano no mesmo frame (várias
     // hitboxes/contatos resolvidos no mesmo tick).
@@ -67,6 +81,10 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
         this.body!.setOffset(this.stats.body.offsetX, this.stats.body.offsetY);
 
         this.setCollideWorldBounds(true);
+
+        if (this.isFlying()) {
+            (this.body as Physics.Arcade.Body).setAllowGravity(false);
+        }
 
         const worldWidth = scene.physics.world.bounds.width;
         this.patrolMinX = Math.max(0, x - 180);
@@ -139,6 +157,14 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
             return 0;
         }
 
+        // Imunidade total (ouriço em bola). Devolver 0 faz a cena tratar o
+        // golpe como não aplicado: sem hit-stop, sem shake, sem marcar o alvo
+        // como já atingido — o jogador sente que bateu em pedra e pode tentar
+        // de novo assim que ele desenrolar.
+        if (this.isDamageImmune()) {
+            return 0;
+        }
+
         const frame = this.scene.game.getFrame();
         if (frame === this.lastDamageFrame) {
             return 0;
@@ -172,15 +198,15 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
         return damage;
     }
 
-    private get arcadeBody(): Physics.Arcade.Body {
+    protected get arcadeBody(): Physics.Arcade.Body {
         return this.body as Physics.Arcade.Body;
     }
 
-    private syncOffset(): void {
+    protected syncOffset(): void {
         syncFacingOffset(this.arcadeBody, this.flipX, this.stats.body);
     }
 
-    private updatePatrol(delta: number): void {
+    protected updatePatrol(delta: number): void {
         this.pauseTimer -= delta;
 
         if (this.isPaused) {
@@ -216,7 +242,7 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
 
     // Persegue o alvo em linha reta dentro do raio de agro. Sai do estado de
     // pausa da patrulha (não faz sentido continuar "descansando" perseguindo).
-    private updateChase(): void {
+    protected updateChase(): void {
         this.isPaused = false;
 
         const dir = this.target.x >= this.x ? 1 : -1;
@@ -231,7 +257,7 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
     // tocando uma das 3 variantes de animação de ataque do tipo (sorteada em
     // attack-variants.ts). Enquanto o golpe está tocando não reinicia nem
     // troca pra idle — só decide de novo quando a animação termina.
-    private updateAttack(time: number): void {
+    protected updateAttack(time: number): void {
         const dir = this.target.x >= this.x ? 1 : -1;
         this.direction = dir;
 
@@ -250,12 +276,12 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
         }
     }
 
-    private isPlayingAttackAnimation(): boolean {
+    protected isPlayingAttackAnimation(): boolean {
         const key = this.anims.currentAnim?.key;
         return !!key && key.startsWith(`${this.typeKey}-attack-`) && this.anims.isPlaying;
     }
 
-    private performAttack(direction: number): void {
+    protected performAttack(direction: number): void {
         this.play(randomAttackAnimationKey(this.typeKey));
 
         // Sincroniza o dano com o instante aproximado do golpe em vez de

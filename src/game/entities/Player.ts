@@ -46,6 +46,12 @@ export class Player extends Physics.Arcade.Sprite {
     private coyoteTimer = 0;
     private jumpBufferTimer = 0;
 
+    // Lentidão da teia da aranha. Multiplica a velocidade horizontal alvo; 1 =
+    // sem efeito. Guardado como fator (e não como velocidade absoluta) para
+    // continuar valendo se PLAYER_MOVEMENT.maxSpeed for rebalanceado.
+    private slowFactor = 1;
+    private slowTimer = 0;
+
     constructor(scene: Scene, x: number, y: number) {
         super(scene, x, y, 'player-idle', 0);
 
@@ -103,6 +109,7 @@ export class Player extends Physics.Arcade.Sprite {
 
         this.updateInvulnerability(delta);
         this.updateHurt(delta);
+        this.updateSlow(delta);
 
         if (!this.controlsEnabled) {
             this.setVelocity(0, 0);
@@ -188,6 +195,22 @@ export class Player extends Physics.Arcade.Sprite {
         this.controlsEnabled = enabled;
     }
 
+    // Aplica lentidão (teia da aranha). Dois acertos não somam: fica valendo o
+    // efeito mais forte e a maior duração restante, senão um bando de aranhas
+    // empilharia o fator até deixar o jogador parado, sem chance de reagir.
+    applySlow(factor: number, durationMs: number): void {
+        if (this.playerState === 'dead') {
+            return;
+        }
+
+        this.slowFactor = Math.min(this.slowFactor, factor);
+        this.slowTimer = Math.max(this.slowTimer, durationMs);
+    }
+
+    get isSlowed(): boolean {
+        return this.slowTimer > 0;
+    }
+
     // Aplica dano ao jogador. Retorna true se o dano foi efetivamente recebido.
     // `direction` (1 = direita, -1 = esquerda) indica o sentido do recuo.
     takeDamage(source: DamageSource, direction: number): boolean {
@@ -256,6 +279,28 @@ export class Player extends Physics.Arcade.Sprite {
         }
     }
 
+    private updateSlow(delta: number) {
+        if (this.slowTimer <= 0) {
+            return;
+        }
+
+        this.slowTimer -= delta;
+        if (this.slowTimer <= 0) {
+            this.slowFactor = 1;
+
+            // Só limpa o tom da teia se nenhum outro estado estiver pintando o
+            // sprite — o vermelho do dano tem prioridade sobre o azul da teia.
+            if (this.hurtTimer <= 0 && this.invulnerabilityTimer <= 0) {
+                this.clearTint();
+            }
+            return;
+        }
+
+        if (this.hurtTimer <= 0 && this.invulnerabilityTimer <= 0) {
+            this.setTint(0xa8d8ff);
+        }
+    }
+
     private updateHurt(delta: number) {
         if (this.hurtTimer <= 0) {
             return;
@@ -307,7 +352,7 @@ export class Player extends Physics.Arcade.Sprite {
     private applyHorizontalMovement(moveX: number, onGround: boolean, dt: number) {
         const body = this.arcadeBody;
         const current = body.velocity.x;
-        const target = moveX * PLAYER_MOVEMENT.maxSpeed;
+        const target = moveX * PLAYER_MOVEMENT.maxSpeed * this.slowFactor;
 
         let acceleration: number;
         if (moveX === 0) {
