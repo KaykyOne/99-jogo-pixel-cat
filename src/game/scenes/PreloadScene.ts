@@ -23,6 +23,12 @@ export class PreloadScene extends Scene {
         this.load.image('forest-mountains', 'florest/montanhas.png');
         this.load.image('forest-trees', 'florest/arvores-casas-trim.png');
         this.load.image('forest-ground', 'florest/chao-strip.png');
+        // Terreno das plataformas, derivado de chao-strip.png (ver
+        // features/PLATFORM_TERRAIN_ASSETS.md): a capa de grama com os tufos e
+        // a faixa de terra ESPELHADA na vertical, que por isso repete sem
+        // emenda em paredes de qualquer altura.
+        this.load.image('forest-grass-top', 'florest/grama-topo.png');
+        this.load.image('forest-dirt', 'florest/terra-tile.png');
         this.load.image('forest-water-edge', 'florest/borda-agua-strip.png');
 
         // O spritesheet tem 2172×724px. Os oito frames de 271px deixam uma

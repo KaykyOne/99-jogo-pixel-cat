@@ -41,3 +41,16 @@ export const PLAYER_DASH = {
     cooldownMs: 2000,
     freezeGravityDuringDash: true
 } as const;
+
+// Escalada agarrada (ver PlayerClimb). A descida é mais rápida que a subida
+// para o retorno não ser arrastado. O mantle precisa erguer o corpo inteiro
+// (34 * 3 = 102 px) acima da borda: 600 px/s com gravidade 1400 sobem ~128 px.
+export const PLAYER_CLIMB = {
+    upSpeed: 190,
+    downSpeed: 260,
+    mantleVelocityY: -600,
+    mantlePushX: 120,
+    // Empurrão constante contra a parede que mantém o contato vivo (ver
+    // PlayerClimb). ~1px por frame, anulado pela separação do collider.
+    wallStickSpeed: 60
+} as const;

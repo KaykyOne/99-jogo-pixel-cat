@@ -5,6 +5,7 @@ import { DamageSource } from '../damage/damage';
 import { Health } from '../damage/Health';
 import { PLAYER_HEALTH } from '../damage/health-config';
 import { PLAYER_BODY, PLAYER_MOVEMENT } from './player-config';
+import { PlayerClimb } from './PlayerClimb';
 import { PlayerDash } from './PlayerDash';
 import { syncFacingOffset } from './physics-utils';
 
@@ -24,6 +25,7 @@ export class Player extends Physics.Arcade.Sprite {
     // overlap da hitbox ativa e leia o resultado dos impactos.
     readonly combat: PlayerCombat;
     readonly dash: PlayerDash;
+    readonly climb: PlayerClimb;
 
     private keys: PlayerKeys;
 
@@ -67,6 +69,7 @@ export class Player extends Physics.Arcade.Sprite {
 
         this.combat = new PlayerCombat(scene, this);
         this.dash = new PlayerDash(scene, this);
+        this.climb = new PlayerClimb(this);
 
         this.keys = scene.input.keyboard!.addKeys({
             attack: Input.Keyboard.KeyCodes.F,
@@ -111,8 +114,20 @@ export class Player extends Physics.Arcade.Sprite {
         const dt = delta / 1000;
         const onGround = this.arcadeBody.blocked.down;
 
+        // Segurar o direcional CONTRA a parede é o que prende na escalada;
+        // W/S sobem e descem enquanto agarrado.
+        const holdingIntoWall =
+            (this.climb.touchingWallDirection === -1 && this.keys.left.isDown) ||
+            (this.climb.touchingWallDirection === 1 && this.keys.right.isDown);
+        const climbInput =
+            (this.keys.up.isDown ? -1 : 0) + (this.keys.down.isDown ? 1 : 0);
+
         this.updateTimers(delta, onGround);
         this.dash.update(time);
+        // O dash controla o corpo inteiro (inclusive a gravidade) enquanto dura.
+        if (!this.dash.isDashing) {
+            this.climb.update(onGround, holdingIntoWall, climbInput);
+        }
         this.combat.update(this.currentAnimFrameIndex);
 
         // Durante o hitstun o jogador não pode atacar nem pular; apenas sofre o
@@ -121,17 +136,28 @@ export class Player extends Physics.Arcade.Sprite {
             // O dash é permitido no ar. Um ataque já iniciado não é
             // interrompido, preservando o ciclo da hitbox de combate.
             if (Input.Keyboard.JustDown(this.keys.dash)) {
+                // Larga a parede antes: senão a escalada devolveria a gravidade
+                // por cima do dash, que a desliga logo em seguida.
+                this.climb.release();
                 this.dash.attemptDash(time, this.flipX ? -1 : 1);
             }
         }
 
-        if (this.hurtTimer <= 0 && !this.dash.isDashing) {
+        if (this.climb.isGripping) {
+            // W está sendo usado para subir, não para pular. Zerar as janelas
+            // evita que o pulo saia sozinho no instante em que soltar a parede.
+            this.jumpBufferTimer = 0;
+            this.coyoteTimer = 0;
+        } else if (this.hurtTimer <= 0 && !this.dash.isDashing) {
             this.handleAttack(time, onGround);
             this.handleJumpQueue();
         }
 
         if (this.dash.isDashing) {
             // PlayerDash controla a velocidade horizontal durante o impulso.
+        } else if (this.climb.isGripping) {
+            // PlayerClimb controla os dois eixos; aqui só encara a parede.
+            this.setFlipX(this.climb.touchingWallDirection < 0);
         } else if (this.combat.isAttacking) {
             // O golpe interrompe o deslocamento horizontal durante a animação.
             this.setVelocityX(0);
@@ -148,7 +174,7 @@ export class Player extends Physics.Arcade.Sprite {
             this.applyHorizontalMovement(moveX, onGround, dt);
         }
 
-        if (!this.dash.isDashing) {
+        if (!this.dash.isDashing && !this.climb.isGripping) {
             this.applyVerticalMovement(dt);
         }
         this.updateAnimation(onGround);
@@ -344,6 +370,26 @@ export class Player extends Physics.Arcade.Sprite {
         // Mantém o frame de dano durante o hitstun.
         if (this.hurtTimer > 0) {
             return;
+        }
+
+        // Não há asset de escalada: subindo/descendo reaproveita o ciclo de
+        // caminhada (lê como braçada na parede) e, parado nela, congela o
+        // frame de salto — mesma solução pragmática já usada em hurt/morte.
+        if (this.climb.isGripping) {
+            if (this.climb.isClimbingVertically) {
+                this.play('player-walk', true);
+                if (this.anims.isPaused) {
+                    this.anims.resume();
+                }
+            } else {
+                this.play('player-jump', true);
+                this.anims.pause();
+            }
+            return;
+        }
+
+        if (this.anims.isPaused) {
+            this.anims.resume();
         }
 
         if (onGround && this.arcadeBody.velocity.x !== 0) {

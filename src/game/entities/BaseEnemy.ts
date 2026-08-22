@@ -4,6 +4,7 @@ import { ENEMY_ATTACK_IMPACT_DELAY_MS, randomAttackAnimationKey } from '../comba
 import { DamageSource } from '../damage/damage';
 import { Health } from '../damage/Health';
 import { EnemyType, ENEMY_STATS } from '../damage/health-config';
+import { isPathBlocked } from '../world/line-of-sight';
 import { Player } from './Player';
 import { syncFacingOffset } from './physics-utils';
 
@@ -112,9 +113,13 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
 
         const distance = Math.abs(this.target.x - this.x);
         const combat = this.stats.combat;
+        // Alcance é medido na horizontal; sem checar a altura, um inimigo numa
+        // saliência perseguiria e acertaria quem está muito abaixo dele.
+        const sameLevel = Math.abs(this.target.y - this.y) <= combat.verticalRange;
 
-        if (this.target.isDead) {
-            // Sem alvo vivo, volta a patrulhar em vez de ficar plantado.
+        if (this.target.isDead || !sameLevel) {
+            // Sem alvo vivo (ou com o alvo noutro nível), volta a patrulhar em
+            // vez de ficar plantado.
             this.updatePatrol(delta);
         } else if (distance <= combat.attackRange) {
             this.updateAttack(time);
@@ -262,9 +267,17 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
             }
 
             // Só acerta se o jogador ainda estiver por perto no instante do
-            // impacto (evita golpe fantasma em quem já se afastou).
-            const stillInRange = Math.abs(this.target.x - this.x) <= this.stats.combat.attackRange + 20;
+            // impacto (evita golpe fantasma em quem já se afastou), no mesmo
+            // nível, e sem parede no caminho — o golpe não pode atravessar o
+            // que o corpo do inimigo não atravessa.
+            const stillInRange =
+                Math.abs(this.target.x - this.x) <= this.stats.combat.attackRange + 20 &&
+                Math.abs(this.target.y - this.y) <= this.stats.combat.verticalRange;
             if (!stillInRange) {
+                return;
+            }
+
+            if (isPathBlocked(this.scene, this.x, this.y, this.target.x, this.target.y)) {
                 return;
             }
 

@@ -26,9 +26,15 @@ export type EnemyBody = {
 // attackRange: distância em que ele para de perseguir e passa a atacar.
 // chaseSpeed: velocidade horizontal durante a perseguição (patrulha usa
 // patrolSpeed, mais lenta, para diferenciar visualmente os dois estados).
+// verticalRange: diferença de altura máxima para considerar que os dois estão
+//   no mesmo nível. aggroRange/attackRange são medidos SÓ na horizontal; sem
+//   este limite, um inimigo numa saliência alta perseguia e acertava quem
+//   estivesse muito abaixo, bastando o x coincidir — inofensivo num mapa
+//   plano, mas quebrado assim que a fase ganhou altura.
 export type EnemyCombat = DamageSource & {
     aggroRange: number;
     attackRange: number;
+    verticalRange: number;
     chaseSpeed: number;
     cooldownMs: number;
 };
@@ -60,6 +66,11 @@ const ENEMY_STATS_TABLE = {
             knockbackY: -200,
             aggroRange: 260,
             attackRange: 50,
+            // Precisa ficar ACIMA da altura máxima de pulo (137px) para o
+            // inimigo não perder o alvo toda vez que o jogador pula na frente
+            // dele, e ABAIXO do espaçamento entre saliências (200px) para não
+            // alcançar quem está noutro nível. 150 fica nessa folga.
+            verticalRange: 150,
             chaseSpeed: 130,
             cooldownMs: 850
         } satisfies EnemyCombat,
@@ -87,6 +98,7 @@ const ENEMY_STATS_TABLE = {
             knockbackY: -240,
             aggroRange: 220,
             attackRange: 55,
+            verticalRange: 150,
             chaseSpeed: 95,
             cooldownMs: 1100
         } satisfies EnemyCombat,
@@ -116,6 +128,9 @@ export const BOSS_STATS: Record<EnemyType, typeof ENEMY_STATS[EnemyType]> = {
             amount: 2,
             aggroRange: 420,
             attackRange: 70,
+            // O boss usa escala 5 (170px de altura), então o alcance vertical
+            // acompanha o próprio corpo em vez de herdar o do inimigo comum.
+            verticalRange: 180,
             cooldownMs: 650
         }
     },
@@ -128,6 +143,7 @@ export const BOSS_STATS: Record<EnemyType, typeof ENEMY_STATS[EnemyType]> = {
             amount: 3,
             aggroRange: 380,
             attackRange: 75,
+            verticalRange: 180,
             cooldownMs: 900
         }
     }

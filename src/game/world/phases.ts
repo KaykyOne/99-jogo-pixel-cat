@@ -4,6 +4,40 @@ export const HEIGHT = 768;
 export const GROUND_Y = HEIGHT / 2;
 export const PHASE_WIDTH = 2560;
 
+// Vocabulário único de level design. Toda plataforma de toda fase usa estes
+// números — é o que faz o mundo ficar legível como um Mario, em vez de cada
+// fase inventar a própria altura.
+//
+// Derivados da física do jogador (ver player-config.ts e a gravidade de 1400
+// definida em Game.create):
+//   altura máxima de pulo = 620² / (2 · 1400) ≈ 137 px  -> STEP com folga de ~37
+//   alcance horizontal    ≈ 255 px a 320 px/s           -> GAP_LONG com folga de ~55
+//
+// Regras que acompanham estes números:
+//   1. Todo `y` de plataforma é GROUND_Y - (n · STEP).
+//   2. Superfície de pouso tem width >= MIN_LANDING.
+//   3. Vão horizontal é GAP_SHORT ou GAP_LONG, nunca um valor entre eles.
+//   4. `climbable` só em parede estreita e alta, no máximo uma por fase.
+export const TERRAIN = {
+    STEP: 100,
+    GAP_SHORT: 120,
+    GAP_LONG: 200,
+    THICKNESS: 40,
+    MIN_LANDING: 120
+} as const;
+
+export type PlatformDef = {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    oneWay?: boolean;
+    climbable?: boolean;
+    // Capa de grama no topo. Desligar em superfícies cujo topo já fica coberto
+    // por outra plataforma, senão as duas capas se sobrepõem no mesmo lugar.
+    grassCap?: boolean;
+};
+
 // As fases não-floresta foram desenhadas originalmente com o chão em 654.
 // Somente posições Y absolutas do céu são reescaladas; tamanhos permanecem.
 const LEGACY_GROUND_Y = 654;
@@ -23,6 +57,10 @@ export type PhaseDefinition = {
     name: string;
     subtitle: string;
     draw: (scene: Scene, x0: number) => void;
+    platforms?: PlatformDef[];
+    // Terreno das plataformas da fase (ver drawPlatforms). Sem ele, elas caem
+    // na paleta pintada de PHASE_SURFACE_PALETTES.
+    platformTexture?: { grassKey: string; dirtKey: string; scale: number };
 };
 
 function fillSky(g: GameObjects.Graphics, x0: number, stops: [number, number][]) {
@@ -33,15 +71,139 @@ function fillSky(g: GameObjects.Graphics, x0: number, stops: [number, number][])
     }
 }
 
-function drawGround(scene: Scene, x0: number, base: number, top: number, speckle: number, accent: number) {
+function drawSurface(
+    scene: Scene,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    base: number,
+    top: number,
+    speckle: number,
+    accent: number
+) {
     const g = scene.add.graphics().setDepth(0);
-    g.fillStyle(base).fillRect(x0, GROUND_Y, PHASE_WIDTH, HEIGHT - GROUND_Y);
-    g.fillStyle(top).fillRect(x0, GROUND_Y, PHASE_WIDTH, 9);
-    g.fillStyle(accent).fillRect(x0, GROUND_Y, PHASE_WIDTH, 3);
+    g.fillStyle(base).fillRect(x, y, width, height);
+    g.fillStyle(top).fillRect(x, y, width, 9);
+    g.fillStyle(accent).fillRect(x, y, width, 3);
     g.fillStyle(speckle);
-    for (let x = x0 + 18; x < x0 + PHASE_WIDTH; x += 38) {
-        const variation = (x * 17) % 13;
-        g.fillRect(x, GROUND_Y - variation, 18, variation + 8);
+    for (let px = x + 18; px < x + width; px += 38) {
+        const variation = (px * 17) % 13;
+        g.fillRect(px, y - variation, 18, variation + 8);
+    }
+
+    // Devolvido para quem desenha plataforma poder ajustar a profundidade sem
+    // duplicar o desenho (ver drawPlatforms).
+    return g;
+}
+
+function drawGround(scene: Scene, x0: number, base: number, top: number, speckle: number, accent: number) {
+    drawSurface(scene, x0, GROUND_Y, PHASE_WIDTH, HEIGHT - GROUND_Y, base, top, speckle, accent);
+}
+
+type SurfacePalette = readonly [base: number, top: number, speckle: number, accent: number];
+
+// As plataformas usam a paleta do terreno da respectiva fase sem exigir que
+// cada definição repita cores. A floresta usa tons equivalentes ao seu chão
+// pintado, que não é desenhado por drawGround.
+const PHASE_SURFACE_PALETTES: Record<string, SurfacePalette> = {
+    forest: [0x294b35, 0x5d8a45, 0x3c6b35, 0x8eb85b],
+    desert: [0xc78b36, 0xd9a441, 0xa9702a, 0xe0b15c],
+    snow: [0xcfe0ef, 0xeaf3fb, 0xb0c7db, 0xffffff],
+    cave: [0x251a30, 0x4a3a5a, 0x332442, 0x9a7bc0],
+    volcano: [0x3f2117, 0x6b3220, 0x54281a, 0xe2683c],
+    ruins: [0x4c473c, 0x6f6a5c, 0x5d584c, 0xa8a286]
+};
+
+// Profundidade das plataformas: acima do cenário de fundo e abaixo do
+// jogador (20), para ele aparecer pisando em cima delas.
+const PLATFORM_DEPTH = 5;
+
+// Alturas medidas no próprio grama-topo.png: os tufos ocupam as primeiras 52
+// linhas (alpha parcial) e são desenhados ACIMA da superfície sólida, como
+// vegetação passando da borda; a grama densa segue até a linha 150.
+const GRASS_SRC_TUFT_H = 52;
+const GRASS_SRC_H = 150;
+
+// Quanto a terra desenhada desce ABAIXO do corpo físico da plataforma. O topo
+// (onde se pisa) não se mexe — só a base afunda, enterrando o corte reto na
+// faixa do chão em vez de deixá-lo à vista como se o monte estivesse pousado
+// solto. Em plataforma flutuante vira uma saia de terra pendurada, que também
+// lê melhor que um bloco fino cortado no meio do ar.
+const PLATFORM_SKIRT = 50;
+
+// Monta a plataforma com o mesmo terreno do chão da fase, em três partes:
+// terra no corpo, capa de grama no topo e sombra nas laterais. Vale igual
+// para saliências deitadas e paredes em pé — a terra é espelhada na vertical
+// no próprio arquivo, então repete sem emenda em qualquer altura.
+function drawTexturedPlatform(
+    scene: Scene,
+    platform: PlatformDef,
+    texture: { grassKey: string; dirtKey: string; scale: number }
+) {
+    const { grassKey, dirtKey, scale } = texture;
+    // Alinhar o recorte da textura à posição no mundo evita que todas as
+    // plataformas saiam com exatamente o mesmo desenho de terra.
+    const tileOffset = Math.round(platform.x / scale);
+    const drawnHeight = platform.height + PLATFORM_SKIRT;
+
+    scene.add
+        .tileSprite(platform.x, platform.y, platform.width, drawnHeight, dirtKey)
+        .setOrigin(0, 0)
+        .setTileScale(scale, scale)
+        .setTilePosition(tileOffset, 0)
+        .setDepth(PLATFORM_DEPTH);
+
+    if (platform.grassCap !== false) {
+        scene.add
+            .tileSprite(
+                platform.x,
+                platform.y - GRASS_SRC_TUFT_H * scale,
+                platform.width,
+                GRASS_SRC_H * scale,
+                grassKey
+            )
+            .setOrigin(0, 0)
+            .setTileScale(scale, scale)
+            .setTilePosition(tileOffset, 0)
+            .setDepth(PLATFORM_DEPTH + 0.1);
+    }
+
+    // Fecha o corte reto da terra nas pontas e por baixo, dando volume à
+    // borda — importante em plataformas soltas e no muro que fica suspenso
+    // sobre a entrada da chaminé.
+    const edges = scene.add.graphics().setDepth(PLATFORM_DEPTH + 0.2);
+    edges.fillStyle(0x000000, 0.28);
+    edges.fillRect(platform.x, platform.y, 3, drawnHeight);
+    edges.fillRect(platform.x + platform.width - 3, platform.y, 3, drawnHeight);
+    edges.fillRect(platform.x, platform.y + drawnHeight - 3, platform.width, 3);
+}
+
+export function drawPlatforms(scene: Scene, phase: PhaseDefinition) {
+    const platforms = phase.platforms ?? [];
+    if (platforms.length === 0) {
+        return;
+    }
+
+    const palette = PHASE_SURFACE_PALETTES[phase.key];
+
+    for (const platform of platforms) {
+        if (phase.platformTexture) {
+            drawTexturedPlatform(scene, platform, phase.platformTexture);
+        } else if (palette) {
+            // Fases sem textura de terreno própria caem no terreno pintado.
+            // Mesma saia da versão texturizada (ver PLATFORM_SKIRT), e acima
+            // do chão pintado (depth 0) para as duas superfícies se fundirem.
+            const g = drawSurface(
+                scene,
+                platform.x,
+                platform.y,
+                platform.width,
+                platform.height + PLATFORM_SKIRT,
+                ...palette
+            );
+            g.setDepth(PLATFORM_DEPTH);
+        }
     }
 }
 
@@ -126,6 +288,7 @@ export const PHASES: PhaseDefinition[] = [
         key: 'forest',
         name: 'FLORESTA VERDE',
         subtitle: 'Fronteira da mata ao amanhecer',
+        platformTexture: { grassKey: 'forest-grass-top', dirtKey: 'forest-dirt', scale: 0.3 },
         draw: (scene, x0) => {
             // Janela bem mais larga que a fase, pra sobrar cobertura nas bordas
             // mesmo nas camadas de parallax mais lentas (scrollFactor baixo faz
@@ -133,8 +296,9 @@ export const PHASES: PhaseDefinition[] = [
             const parallaxX = x0 - 1000;
             const parallaxWidth = PHASE_WIDTH + 2000;
 
-            // Céu: praticamente parado (scrollFactor quase 0), já traz nuvens e
-            // uma silhueta bem distante de árvores pintadas na própria imagem.
+            // Parallax só no eixo X: com o mundo de volta aos 768 px planos, a
+            // câmera não rola na vertical e um fator em Y não teria efeito
+            // nenhum — igual às outras cinco fases.
             const skyScale = HEIGHT / 1086;
             scene.add
                 .tileSprite(parallaxX, 0, parallaxWidth, HEIGHT, 'forest-sky')
@@ -161,7 +325,7 @@ export const PHASES: PhaseDefinition[] = [
             const treesHeight = 450;
             const treesScale = treesHeight / 548;
             scene.add
-                .tileSprite(parallaxX, GROUND_Y +20, parallaxWidth, treesHeight, 'forest-trees')
+                .tileSprite(parallaxX, GROUND_Y + 20, parallaxWidth, treesHeight, 'forest-trees')
                 .setOrigin(0, 1)
                 .setScrollFactor(0.45, 0)
                 .setTileScale(treesScale, treesScale)
@@ -177,12 +341,66 @@ export const PHASES: PhaseDefinition[] = [
                 .tileSprite(x0, GROUND_Y - 5, PHASE_WIDTH, groundTextureHeight, 'forest-ground')
                 .setOrigin(0, 0)
                 .setTileScale(0.3, 0.3)
-                .setDepth(50);
+                // Depth 1 (e não 50): a faixa do chão precisa ficar ABAIXO das
+                // plataformas, senão ela corta a base dos montes na linha do
+                // chão e cada um deles parece uma peça solta pousada em cima.
+                // Continua acima da água (0.5/0.6) e abaixo do jogador (20).
+                .setDepth(1);
 
             // Base d'água por baixo do chão inteiro; o reflexo ao vivo (câmera
             // espelhada) é ligado em Game.ts depois que HUD/mapa existem.
             drawWaterBase(scene, x0);
-        }
+
+            // Vegetação em cima dos montes (ver `platforms`), reaproveitando
+            // drawPine em vez de arte nova. Depth 4 (abaixo das plataformas,
+            // que ficam em 5) esconde a base do tronco dentro do monte.
+            const moundFlora = scene.add.graphics().setDepth(4);
+            drawPine(moundFlora, x0 + 800, GROUND_Y - TERRAIN.STEP, 0.5, 0x6b4a33, 0x4f7a3d, 0x3c5f2d);
+            drawPine(moundFlora, x0 + 1260, GROUND_Y - TERRAIN.STEP * 2, 0.4, 0x6b4a33, 0x4f7a3d, 0x3c5f2d);
+            drawPine(moundFlora, x0 + 1650, GROUND_Y - TERRAIN.STEP, 0.45, 0x6b4a33, 0x4f7a3d, 0x3c5f2d);
+        },
+        // Percurso na ordem em que é atravessado: degrau -> degrau duplo ->
+        // vão longo -> plataforma solta -> parede escalável -> arena do boss.
+        platforms: [
+            // Um degrau. Um inimigo patrulha no topo (ver spawnEnemies).
+            { x: 760, y: GROUND_Y - TERRAIN.STEP, width: 220, height: TERRAIN.STEP },
+
+            // Dois degraus, alcançado a partir do anterior (GAP_SHORT).
+            { x: 1100, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.STEP * 2 },
+
+            // GAP_LONG descendo um degrau: o primeiro pulo que exige
+            // compromisso. Fica em 1 STEP (e não em 2) de propósito — a 2
+            // STEPs o topo da parede escalável entraria na altura de pulo, e
+            // a única coisa segurando o salto seria a distância, com 25px de
+            // margem. Aqui a parede fica 200px acima, fora de alcance.
+            { x: 1500, y: GROUND_Y - TERRAIN.STEP, width: 180, height: TERRAIN.STEP },
+
+            // Plataforma solta one-way encostada na parede escalável. É daqui
+            // que se agarra a parede: PlayerClimb só prende com o corpo caindo
+            // ou perto do ápice (velocity.y >= -50) e solta assim que toca o
+            // chão, então saltar do chão deixaria uma janela de agarre curta
+            // demais. Pulando daqui, o ápice cai no meio da parede.
+            {
+                x: 1800,
+                y: GROUND_Y - TERRAIN.STEP,
+                width: 160,
+                height: TERRAIN.THICKNESS,
+                oneWay: true
+            },
+
+            // ÚNICA parede escalável do jogo. O topo fica 3 STEPs acima do
+            // chão e 2 STEPs acima da plataforma vizinha — os dois fora do
+            // alcance do pulo (137px), então só se passa escalando. É o que
+            // tranca a arena do boss, que nasce em 2140 com patrulha a partir
+            // de 2040: a parede termina em 2030 para não invadir a arena.
+            {
+                x: 1960,
+                y: GROUND_Y - TERRAIN.STEP * 3,
+                width: 70,
+                height: TERRAIN.STEP * 3,
+                climbable: true
+            }
+        ]
     },
     // 2 - Deserto
     {
@@ -220,7 +438,20 @@ export const PHASES: PhaseDefinition[] = [
                 sand.lineBetween(x, GROUND_Y + 14, x + 48, GROUND_Y + 14);
                 sand.lineBetween(x + 10, GROUND_Y + 28, x + 58, GROUND_Y + 28);
             }
-        }
+        },
+        platforms: [
+            { x: 700, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP },
+            { x: 1060, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.STEP * 2 },
+            {
+                x: 1460,
+                y: GROUND_Y - TERRAIN.STEP * 2,
+                width: 180,
+                height: TERRAIN.THICKNESS,
+                oneWay: true
+            },
+            // Termina em 2020: a partir de 2040 é a patrulha do boss.
+            { x: 1840, y: GROUND_Y - TERRAIN.STEP, width: 180, height: TERRAIN.STEP }
+        ]
     },
     // 3 - Neve
     {
@@ -258,7 +489,19 @@ export const PHASES: PhaseDefinition[] = [
             for (let x = x0 + 24; x < x0 + PHASE_WIDTH; x += 60) {
                 snow.fillCircle(x, GROUND_Y + 22, 5);
             }
-        }
+        },
+        platforms: [
+            { x: 640, y: GROUND_Y - TERRAIN.STEP, width: 200, height: TERRAIN.STEP },
+            { x: 960, y: GROUND_Y - TERRAIN.STEP * 2, width: 240, height: TERRAIN.STEP * 2 },
+            {
+                x: 1400,
+                y: GROUND_Y - TERRAIN.STEP,
+                width: 180,
+                height: TERRAIN.THICKNESS,
+                oneWay: true
+            },
+            { x: 1780, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.STEP * 2 }
+        ]
     },
     // 4 - Caverna
     {
@@ -297,7 +540,19 @@ export const PHASES: PhaseDefinition[] = [
             for (let x = x0 + 40; x < x0 + PHASE_WIDTH; x += 80) {
                 pebbles.fillCircle(x, GROUND_Y + 20, 4);
             }
-        }
+        },
+        platforms: [
+            { x: 620, y: GROUND_Y - TERRAIN.STEP, width: 220, height: TERRAIN.STEP },
+            { x: 960, y: GROUND_Y - TERRAIN.STEP * 2, width: 180, height: TERRAIN.STEP * 2 },
+            {
+                x: 1340,
+                y: GROUND_Y - TERRAIN.STEP * 2,
+                width: 160,
+                height: TERRAIN.THICKNESS,
+                oneWay: true
+            },
+            { x: 1700, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP }
+        ]
     },
     // 5 - Vulcão (por do sol)
     {
@@ -338,7 +593,19 @@ export const PHASES: PhaseDefinition[] = [
             for (let x = 160; x < PHASE_WIDTH; x += 360, li++) {
                 lava.fillRect(x0 + x, GROUND_Y + 12, 26 + (li % 3) * 10, 4);
             }
-        }
+        },
+        platforms: [
+            { x: 700, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP },
+            {
+                x: 1060,
+                y: GROUND_Y - TERRAIN.STEP,
+                width: 180,
+                height: TERRAIN.THICKNESS,
+                oneWay: true
+            },
+            { x: 1360, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.STEP * 2 },
+            { x: 1760, y: GROUND_Y - TERRAIN.STEP, width: 220, height: TERRAIN.STEP }
+        ]
     },
     // 6 - Ruínas
     {
@@ -377,6 +644,19 @@ export const PHASES: PhaseDefinition[] = [
 
             drawClouds(scene, x0, 0xd9c9ea);
             drawGround(scene, x0, 0x4c473c, 0x6f6a5c, 0x5d584c, 0xa8a286);
-        }
+        },
+        platforms: [
+            { x: 640, y: GROUND_Y - TERRAIN.STEP, width: 200, height: TERRAIN.STEP },
+            { x: 960, y: GROUND_Y - TERRAIN.STEP * 2, width: 220, height: TERRAIN.STEP * 2 },
+            {
+                x: 1380,
+                y: GROUND_Y - TERRAIN.STEP * 2,
+                width: 180,
+                height: TERRAIN.THICKNESS,
+                oneWay: true
+            },
+            // Um inimigo patrulha no topo deste (ver spawnEnemies).
+            { x: 1760, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP }
+        ]
     }
 ];

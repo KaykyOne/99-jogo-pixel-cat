@@ -1,4 +1,4 @@
-import { GameObjects, Input, Physics, Scene } from 'phaser';
+import { GameObjects, Geom, Input, Physics, Scene } from 'phaser';
 
 import { MeleeHitbox } from '../combat/MeleeHitbox';
 import { DamageSource } from '../damage/damage';
@@ -8,7 +8,17 @@ import { Boss } from '../entities/Boss';
 import { createEnemy } from '../entities/enemy-factory';
 import { Player } from '../entities/Player';
 import { clearSave, Difficulty, loadSave, writeSave } from '../state/save';
-import { FOREST_WATER_TOP_Y, GROUND_Y, HEIGHT, PHASES, PHASE_WIDTH, PhaseDefinition } from '../world/phases';
+import { isPathBlocked, setLineOfSightBlockers } from '../world/line-of-sight';
+import {
+    drawPlatforms,
+    FOREST_WATER_TOP_Y,
+    GROUND_Y,
+    HEIGHT,
+    PHASES,
+    PHASE_WIDTH,
+    PhaseDefinition,
+    PlatformDef
+} from '../world/phases';
 
 type Portal = {
     zoneX: number;
@@ -24,6 +34,14 @@ type SceneData = {
 };
 
 type MapPhaseState = 'locked' | 'reached' | 'cleared';
+
+type EnemySpawn = {
+    type: EnemyType;
+    x: number;
+    y?: number;
+    minX?: number;
+    maxX?: number;
+};
 
 export class PhaseScene extends Scene {
     private phase: PhaseDefinition;
@@ -56,6 +74,8 @@ export class PhaseScene extends Scene {
 
     // Textura espelhada do lago, criada apenas na floresta.
     private lakeReflection?: GameObjects.RenderTexture;
+    // Objetos de HUD que o espelho não pode capturar (senão o painel de vida
+    // apareceria refletido dentro da água).
     private hudObjects: GameObjects.GameObject[] = [];
 
     constructor(phase: PhaseDefinition, phaseIndex: number) {
@@ -86,6 +106,8 @@ export class PhaseScene extends Scene {
             clearedPhases: loadSave()?.clearedPhases ?? []
         });
 
+        // Mundo plano de 768px em todas as fases: o terreno simplificado não
+        // tem mais nada acima do topo da tela.
         this.physics.world.setBounds(0, 0, PHASE_WIDTH, HEIGHT);
         // Uma gravidade mais firme deixa os saltos responsivos sem o personagem
         // parecer flutuar.
@@ -93,6 +115,7 @@ export class PhaseScene extends Scene {
 
         // Esta cena desenha APENAS a sua própria fase (x0 = 0).
         this.phase.draw(this, 0);
+        drawPlatforms(this, this.phase);
 
         this.buildPhysics();
 
@@ -102,18 +125,69 @@ export class PhaseScene extends Scene {
         this.player = new Player(this, spawnX, GROUND_Y - 80);
         this.player.setDepth(20);
 
-        const colliders = Array.from(this.physics.world.staticBodies);
+        // physics.world.staticBodies guarda CORPOS; os colliders (e os callbacks
+        // deles) trabalham com GameObjects. Converter aqui evita entregar um
+        // StaticBody onde o callback espera um GameObject — era isso que
+        // estourava já na primeira colisão com o chão e travava a fase.
+        const staticObjects = Array.from(this.physics.world.staticBodies)
+            .map(body => body.gameObject)
+            .filter((object): object is GameObjects.GameObject => !!object);
+
+        const platformDefOf = (object: GameObjects.GameObject) =>
+            object.getData('platformDef') as PlatformDef | undefined;
+
+        const solidColliders = staticObjects.filter(object => platformDefOf(object)?.oneWay !== true);
+        const oneWayColliders = staticObjects.filter(object => platformDefOf(object)?.oneWay === true);
+
+        // Superfícies que cortam golpes. Só as plataformas sólidas declaradas
+        // pela fase entram: o chão e os muros de borda do mundo nunca ficam
+        // entre dois combatentes, e as one-way são atravessáveis de propósito.
+        setLineOfSightBlockers(
+            this,
+            staticObjects
+                .filter(object => {
+                    const def = platformDefOf(object);
+                    return !!def && def.oneWay !== true;
+                })
+                .map(object => {
+                    const body = object.body as Physics.Arcade.StaticBody;
+                    return new Geom.Rectangle(body.x, body.y, body.width, body.height);
+                })
+        );
+
+        const canLandOnOneWay = (actor: unknown, platform: unknown) => {
+            const actorBody = (actor as GameObjects.GameObject).body as Physics.Arcade.Body;
+            const platformBody = (platform as GameObjects.GameObject).body as Physics.Arcade.StaticBody;
+            return actorBody.velocity.y >= 0 && actorBody.bottom <= platformBody.top + 1;
+        };
 
         // O jogador tamb\u00e9m precisa colidir com o ch\u00e3o e com as paredes da fase.
         // Sem este collider ele apenas ca\u00eda at\u00e9 o limite do mundo, o que fazia
         // pulo, movimento e encontros com inimigos parecerem quebrados.
-        this.physics.add.collider(this.player, colliders);
+        // O contato com a parede escalável é registrado DENTRO do collider
+        // sólido, não num collider próprio: o primeiro collider a rodar separa
+        // os corpos, e um segundo sobre o mesmo par já não encontraria
+        // sobreposição nenhuma para disparar o callback. O lado vem da
+        // geometria, não de body.blocked, pelo mesmo motivo de ordem.
+        this.physics.add.collider(this.player, solidColliders, (_playerObj, wallObj) => {
+            const wall = wallObj as GameObjects.GameObject;
+            if (!platformDefOf(wall)?.climbable) {
+                return;
+            }
+
+            const wallBody = wall.body as Physics.Arcade.StaticBody;
+            const playerBody = this.player.body as Physics.Arcade.Body;
+            const direction = wallBody.center.x < playerBody.center.x ? -1 : 1;
+            this.player.climb.markTouchingWall(direction, wallBody.top);
+        });
+        this.physics.add.collider(this.player, oneWayColliders, undefined, canLandOnOneWay);
 
         this.spawnEnemies();
         this.spawnBoss();
 
         for (const enemy of this.enemies) {
-            this.physics.add.collider(enemy, colliders);
+            this.physics.add.collider(enemy, solidColliders);
+            this.physics.add.collider(enemy, oneWayColliders, undefined, canLandOnOneWay);
             this.physics.add.collider(
                 this.player,
                 enemy,
@@ -227,38 +301,54 @@ export class PhaseScene extends Scene {
 
     private spawnEnemies() {
         // Distribuição de inimigos por fase (key das fases).
-        const spawns: Record<string, { type: EnemyType; x: number; minX?: number; maxX?: number }[]> = {
+        // Todo spawn PRECISA de minX/maxX: a patrulha não detecta borda
+        // sozinha. Em cima de plataforma, a faixa é a largura dela com 40px de
+        // folga de cada lado (senão o inimigo anda para fora e cai); no chão, a
+        // faixa fica num trecho aberto, sem plataforma sólida por cima — um
+        // spawn de chão embaixo de um monte nasce ENTERRADO nele.
+        //
+        // O Y elevado é sempre `topo da plataforma - 80`, a mesma folga de
+        // queda usada pelos spawns do chão.
+        const spawns: Record<string, EnemySpawn[]> = {
             forest: [
-                { type: 'graverobber', x: 700 },
-                { type: 'graverobber', x: 1500 }
+                { type: 'graverobber', x: 500, minX: 300, maxX: 700 },
+                // Sobre o degrau de 1 STEP (x 760..980, topo 284).
+                { type: 'graverobber', x: 870, y: 204, minX: 800, maxX: 940 },
+                // Sobre o monte de 1 STEP após o vão longo (x 1500..1680, topo 284).
+                { type: 'graverobber', x: 1590, y: 204, minX: 1540, maxX: 1640 }
             ],
             desert: [
-                { type: 'steamman', x: 800 },
-                { type: 'steamman', x: 1900 }
+                { type: 'steamman', x: 450, minX: 250, maxX: 650 },
+                { type: 'steamman', x: 1520, minX: 1320, maxX: 1780 }
             ],
             snow: [
-                { type: 'graverobber', x: 1000 },
-                { type: 'graverobber', x: 2100 }
+                { type: 'graverobber', x: 400, minX: 220, maxX: 600 },
+                { type: 'graverobber', x: 1420, minX: 1240, maxX: 1700 }
             ],
             cave: [
-                { type: 'steamman', x: 900 },
-                { type: 'graverobber', x: 1600 }
+                { type: 'graverobber', x: 400, minX: 220, maxX: 580 },
+                { type: 'steamman', x: 1400, minX: 1180, maxX: 1660 }
             ],
             volcano: [
-                { type: 'steamman', x: 800 },
-                { type: 'steamman', x: 1700 }
+                { type: 'steamman', x: 400, minX: 220, maxX: 620 },
+                { type: 'steamman', x: 1150, minX: 980, maxX: 1340 }
             ],
             ruins: [
-                { type: 'graverobber', x: 900 },
-                { type: 'steamman', x: 1500 },
-                { type: 'steamman', x: 2200 }
+                { type: 'graverobber', x: 400, minX: 220, maxX: 600 },
+                { type: 'steamman', x: 1300, minX: 1220, maxX: 1700 },
+                // Sobre o degrau de 1 STEP (x 1760..2000, topo 284).
+                { type: 'steamman', x: 1880, y: 204, minX: 1800, maxX: 1960 }
             ]
         };
 
         const phaseSpawns = spawns[this.phase.key] ?? [];
 
         for (const spawn of phaseSpawns) {
-            const enemy = createEnemy(this, spawn.type, spawn.x, GROUND_Y - 80, this.player);
+            // Spawns sem Y explícito preservam a altura original do chão.
+            // Spawns elevados devem informar minX/maxX conforme a plataforma
+            // onde estão, pois a patrulha não detecta bordas automaticamente.
+            const y = spawn.y ?? GROUND_Y - 80;
+            const enemy = createEnemy(this, spawn.type, spawn.x, y, this.player);
 
             enemy.setDepth(15);
 
@@ -304,6 +394,13 @@ export class PhaseScene extends Scene {
         }
 
         if (this.player.combat.hasTargetBeenHit(enemy)) {
+            return;
+        }
+
+        // A hitbox é um retângulo à frente do jogador e não conhece o cenário:
+        // encostado numa parede, ela invade o outro lado. Sem esta checagem o
+        // golpe atravessava a parede e acertava quem estava atrás dela.
+        if (isPathBlocked(this, this.player.x, this.player.y, enemy.x, enemy.y)) {
             return;
         }
 
@@ -386,6 +483,23 @@ export class PhaseScene extends Scene {
         rightWall.setOrigin(0.5, 0);
         rightWall.setAlpha(0);
         this.physics.add.existing(rightWall, true);
+
+        // Plataformas extras entram nos colliders estáticos da cena. O dado da
+        // definição permite distinguir plataformas one-way na criação dos
+        // colliders e também será reutilizado pela escalada de paredes.
+        for (const platform of this.phase.platforms ?? []) {
+            const rect = this.add.rectangle(
+                platform.x,
+                platform.y,
+                platform.width,
+                platform.height,
+                0x000000
+            );
+            rect.setOrigin(0, 0);
+            rect.setAlpha(0);
+            rect.setData('platformDef', platform);
+            this.physics.add.existing(rect, true);
+        }
     }
 
     private buildPortals() {
@@ -483,13 +597,11 @@ export class PhaseScene extends Scene {
         const ui = this.add.graphics().setDepth(30).setScrollFactor(0);
         ui.fillStyle(0x10212b, 0.75).fillRoundedRect(24, 22, 320, 74, 6);
         ui.lineStyle(2, 0xb8cc84, 0.55).strokeRoundedRect(24, 22, 320, 74, 6);
-        this.hudObjects.push(ui);
 
         const nameText = this.add
             .text(43, 45, this.phase.name, { fontFamily: 'Georgia, serif', fontSize: '20px', color: '#f7e7b0' })
             .setDepth(31)
             .setScrollFactor(0);
-        this.hudObjects.push(nameText);
 
         this.hpText = this.add
             .text(300, 50, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ff6b6b' })
@@ -497,16 +609,14 @@ export class PhaseScene extends Scene {
             .setDepth(31)
             .setScrollFactor(0);
         this.lastHp = -1;
-        this.hudObjects.push(this.hpText);
 
         const subtitleText = this.add
             .text(43, 72, this.phase.subtitle, { fontFamily: 'monospace', fontSize: '11px', color: '#9db68d' })
             .setDepth(31)
             .setScrollFactor(0);
-        this.hudObjects.push(subtitleText);
 
         this.controlsText = this.add
-            .text(this.scale.width - 44, 30, 'A/D mover  ·  W pular  ·  F atacar  ·  Espaço dash', {
+            .text(this.scale.width - 44, 30, 'A/D mover  ·  W pular  ·  F atacar  ·  Espaço dash  ·  A/D na parede + W/S escalar', {
                 fontFamily: 'monospace',
                 fontSize: '11px',
                 color: '#c0d9b1'
@@ -514,7 +624,8 @@ export class PhaseScene extends Scene {
             .setOrigin(1, 0)
             .setDepth(31)
             .setScrollFactor(0);
-        this.hudObjects.push(this.controlsText);
+
+        this.hudObjects.push(ui, nameText, this.hpText, subtitleText, this.controlsText);
 
         this.dashIndicator = this.add
             .circle(this.player.x, this.player.y - 60, 6, 0x4ade80)
@@ -719,7 +830,9 @@ export class PhaseScene extends Scene {
         const height = HEIGHT - FOREST_WATER_TOP_Y;
         const rt = this.add.renderTexture(0, FOREST_WATER_TOP_Y, width, height);
         rt.setOrigin(0, 0);
-        rt.setScrollFactor(0);
+        // Fixo na horizontal (a captura já acompanha scrollX) e ancorado ao
+        // mundo na vertical, onde a superfície da água de fato está.
+        rt.setScrollFactor(0, 1);
         rt.setFlipY(true);
         rt.setAlpha(0.85);
         // Fica acima da base azul (0.5), mas abaixo da borda/espuma (0.6),
@@ -743,8 +856,11 @@ export class PhaseScene extends Scene {
 
     private updateLakeReflection() {
         const rt = this.lakeReflection!;
+        const camera = this.cameras.main;
+
         rt.clear();
-        rt.camera.setScroll(this.cameras.main.scrollX, 0);
+        // A captura sai do topo do mundo: é a faixa que o espelho reflete.
+        rt.camera.setScroll(camera.scrollX, 0);
 
         const excluded = new Set<GameObjects.GameObject>([
             rt,
