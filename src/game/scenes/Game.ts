@@ -672,7 +672,7 @@ export class PhaseScene extends Scene {
             .setScrollFactor(0);
 
         this.controlsText = this.add
-            .text(this.scale.width - 44, 30, 'A/D mover  ·  W pular  ·  F atacar  ·  Q defender  ·  Espaço dash  ·  A/D na parede + W/S escalar', {
+            .text(this.scale.width - 44, 30, 'A/D mover  ·  W pular  ·  F atacar  ·  Q segurar p/ defender  ·  Espaço dash  ·  A/D na parede + W/S escalar', {
                 fontFamily: 'monospace',
                 fontSize: '11px',
                 color: '#c0d9b1'

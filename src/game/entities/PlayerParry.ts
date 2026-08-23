@@ -11,15 +11,15 @@ export type Parryable = {
     stagger(durationMs: number): void;
 };
 
-// Defesa do jogador (tecla Q). Anula o dano do golpe que chegar dentro da
-// janela ativa e devolve o revide: quem foi defendido leva a reação de dano
-// (sem perder vida) e fica sem atacar por PLAYER_PARRY.staggerMs.
+// Defesa do jogador (tecla Q). Postura sustentada: fica ativa ENQUANTO a
+// tecla estiver pressionada. Anula o dano de qualquer golpe que chegue nesse
+// período e devolve o revide — quem foi defendido leva a reação de dano (sem
+// perder vida) e fica sem atacar por PLAYER_PARRY.staggerMs.
 //
 // Segue o mesmo padrão de PlayerDash e PlayerClimb: o Player só entrega a
 // intenção, o componente controla janela, cooldown e efeito.
 export class PlayerParry {
     private state: 'idle' | 'active' | 'recovering' = 'idle';
-    private activeUntil = 0;
     private recoveringUntil = 0;
     private cooldownUntil = 0;
 
@@ -48,14 +48,13 @@ export class PlayerParry {
         return this.scene.time.now >= this.cooldownUntil ? 'ready' : 'charging';
     }
 
+    // Chamado no instante em que Q é pressionado.
     attempt(time: number): boolean {
         if (this.state !== 'idle' || time < this.cooldownUntil) {
             return false;
         }
 
         this.state = 'active';
-        this.activeUntil = time + PLAYER_PARRY.activeMs;
-        this.cooldownUntil = time + PLAYER_PARRY.cooldownMs;
 
         // Não há asset de defesa: congela o frame de salto (mesma solução
         // pragmática já usada na escalada) e pinta de azul-claro para o estado
@@ -67,10 +66,16 @@ export class PlayerParry {
         return true;
     }
 
-    update(time: number): void {
-        if (this.state === 'active' && time >= this.activeUntil) {
+    // `held` é o estado ATUAL da tecla, não um evento: a defesa dura enquanto
+    // Q estiver pressionado, então precisa ser reavaliado todo frame.
+    update(time: number, held: boolean): void {
+        if (this.state === 'active' && !held) {
+            // Soltou: entra em recuperação e só então começa a contar o
+            // cooldown. Marcando o cooldown na hora do toque, soltar e apertar
+            // de novo daria defesa contínua sem abertura nenhuma.
             this.state = 'recovering';
             this.recoveringUntil = time + PLAYER_PARRY.recoveryMs;
+            this.cooldownUntil = time + PLAYER_PARRY.cooldownMs;
             this.owner.clearTint();
             return;
         }

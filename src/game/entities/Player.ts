@@ -135,7 +135,7 @@ export class Player extends Physics.Arcade.Sprite {
             (this.keys.up.isDown ? -1 : 0) + (this.keys.down.isDown ? 1 : 0);
 
         this.updateTimers(delta, onGround);
-        this.parry.update(time);
+        this.parry.update(time, this.keys.parry.isDown);
         this.dash.update(time);
         // O dash controla o corpo inteiro (inclusive a gravidade) enquanto dura.
         if (!this.dash.isDashing) {
@@ -156,15 +156,22 @@ export class Player extends Physics.Arcade.Sprite {
             }
         }
 
-        // Q defende. Só do chão e fora de qualquer outra ação: no ar ou no
-        // meio de um golpe a defesa viraria um cancelamento universal.
+        // Q defende, e a defesa dura enquanto a tecla estiver pressionada (a
+        // soltura é tratada em parry.update). Lê `isDown` e não `JustDown`:
+        // sendo uma postura sustentada, apertar Q no ar e aterrissar segurando
+        // deve entrar em guarda ao tocar o chão, em vez de exigir soltar e
+        // apertar de novo. O componente ignora a chamada se já estiver em
+        // guarda ou em cooldown, então chamar todo frame é inofensivo.
+        //
+        // Só do chão e fora de qualquer outra ação: no ar ou no meio de um
+        // golpe a defesa viraria um cancelamento universal.
         if (
             this.hurtTimer <= 0 &&
             onGround &&
             !this.dash.isDashing &&
             !this.climb.isGripping &&
             !this.combat.isAttacking &&
-            Input.Keyboard.JustDown(this.keys.parry)
+            this.keys.parry.isDown
         ) {
             this.parry.attempt(time);
         }

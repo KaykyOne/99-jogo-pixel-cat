@@ -55,15 +55,16 @@ export const PLAYER_CLIMB = {
     wallStickSpeed: 60
 } as const;
 
-// Parry (tecla Q). A janela ativa é curta de propósito: defender precisa ser
-// uma leitura do golpe do inimigo, não um botão de segurar. O cooldown impede
-// que dê para martelar Q e ficar invulnerável.
+// Parry (tecla Q). É uma POSTURA sustentada: fica ativa enquanto Q estiver
+// pressionado, sem limite de tempo. O custo não é a duração e sim a
+// imobilidade — defendendo, o jogador não anda, não pula e não ataca, então
+// segurar Q para sempre trava o avanço em vez de ganhar a luta.
 export const PLAYER_PARRY = {
-    // Quanto tempo a defesa fica valendo depois do toque.
-    activeMs: 280,
-    // Tempo travado depois da janela, tenha acertado ou não. É o risco de
-    // errar o tempo: quem defende cedo demais fica exposto.
+    // Tempo travado depois de SOLTAR a tecla. É a brecha para o inimigo: não
+    // dá para largar a defesa e atacar no mesmo instante.
     recoveryMs: 220,
+    // Contado a partir da soltura, não do toque — senão bastaria soltar e
+    // apertar de novo para ter defesa contínua sem nenhuma abertura.
     cooldownMs: 900,
 
     // Quanto tempo o inimigo defendido fica sem atacar. Pedido do design: 2s.
