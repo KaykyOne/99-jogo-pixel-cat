@@ -1,6 +1,7 @@
 import { Scene } from 'phaser';
 
 import { randomAttackAnimationKey } from '../combat/attack-variants';
+import { ENEMY_STATS } from '../damage/health-config';
 import { BaseEnemy } from './BaseEnemy';
 import { Player } from './Player';
 
@@ -64,7 +65,7 @@ export class Hedgehog extends BaseEnemy {
     private damageAppliedThisPass = false;
 
     constructor(scene: Scene, x: number, y: number, target: Player) {
-        super(scene, x, y, 'hedgehog', target);
+        super(scene, x, y, 'hedgehog', target, ENEMY_STATS.hedgehog);
     }
 
     protected isDamageImmune(): boolean {

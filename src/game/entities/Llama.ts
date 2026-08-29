@@ -21,7 +21,7 @@ const LLAMA_BEHAVIOR = {
 export class Llama extends BaseEnemy {
 
     constructor(scene: Scene, x: number, y: number, target: Player) {
-        super(scene, x, y, 'llama', target);
+        super(scene, x, y, 'llama', target, ENEMY_STATS.llama);
     }
 
     // Sobrescreve updateAttack para implementar comportamento de recuo.

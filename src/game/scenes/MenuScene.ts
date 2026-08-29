@@ -62,7 +62,10 @@ export class MenuScene extends Scene {
         this.mainPanel.add(title);
 
         if (save) {
-            const phase = PHASES[save.phaseIndex];
+            // A vila entrou como PHASES[0] e deslocou todos os índices. A chave
+            // do save muda junto (invalidando os antigos), mas um índice fora
+            // da lista não pode virar `scene.start(undefined)`: cai na vila.
+            const phase = PHASES[save.phaseIndex] ?? PHASES[0];
             const difficulty = save.difficulty === 'hard' ? 'Difícil' : 'Normal';
             this.mainPanel.add(
                 this.createButton(

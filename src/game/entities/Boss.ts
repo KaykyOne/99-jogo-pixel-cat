@@ -26,6 +26,10 @@ export class Boss extends BaseEnemy {
             .setDepth(17);
     }
 
+    protected isBossEnemy(): boolean {
+        return true;
+    }
+
     update(time: number, delta: number): void {
         super.update(time, delta);
 

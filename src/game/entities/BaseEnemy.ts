@@ -1,9 +1,11 @@
-import { Math as PhaserMath, Physics, Scene } from 'phaser';
+import { Math as PhaserMath, Physics, Scene, TintModes } from 'phaser';
 
 import { ENEMY_ATTACK_IMPACT_DELAY_MS, randomAttackAnimationKey } from '../combat/attack-variants';
 import { DamageSource } from '../damage/damage';
 import { Health } from '../damage/Health';
-import { EnemyType, ENEMY_STATS } from '../damage/health-config';
+import { getDifficultyModifiersFor } from '../config/difficulty';
+import { GROUND_Y } from '../world/phases';
+import { EnemyStatsShape } from '../damage/health-config';
 import { isPathBlocked } from '../world/line-of-sight';
 import { Player } from './Player';
 import { syncFacingOffset } from './physics-utils';
@@ -11,7 +13,16 @@ import { PLAYER_PARRY } from './player-config';
 
 export type EnemyState = 'patrol' | 'chase' | 'attack' | 'hurt' | 'dead';
 
-type EnemyTypeStats = (typeof ENEMY_STATS)[EnemyType];
+// Carga do evento 'enemy:died' emitido em scene.events. É o contrato pelo qual
+// o resto do jogo (drops, contadores de fase) sabe que alguém morreu, sem
+// nenhum sistema precisar segurar referência ao inimigo — que já está a
+// caminho do destroy() quando o evento sai.
+export type EnemyDiedEvent = {
+    x: number;
+    y: number;
+    type: string;
+    isBoss: boolean;
+};
 
 // Classe base de inimigo: concentra tudo que é comportamento comum (vida,
 // corpo, patrulha, perseguir o jogador dentro de um raio, atacar quando perto
@@ -19,8 +30,10 @@ type EnemyTypeStats = (typeof ENEMY_STATS)[EnemyType];
 // informam o tipo/estatísticas — nenhuma delas precisa reimplementar chase,
 // ataque ou dano.
 export abstract class BaseEnemy extends Physics.Arcade.Sprite {
-    protected readonly stats: EnemyTypeStats;
-    protected readonly typeKey: EnemyType;
+    protected readonly stats: EnemyStatsShape;
+    // String livre (e não EnemyType) para os bosses dedicados poderem registrar
+    // a própria arte sob uma chave própria sem entrar na tabela de spawn comum.
+    protected readonly typeKey: string;
     protected readonly target: Player;
 
     // --- Ganchos para subclasses -------------------------------------------
@@ -37,9 +50,21 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
         return false;
     }
 
+    // Marca este inimigo como boss no evento 'enemy:died'. Existe como gancho
+    // (e não como `instanceof Boss`) para o BaseEnemy não precisar importar as
+    // classes que o estendem — seria um ciclo.
+    protected isBossEnemy(): boolean {
+        return false;
+    }
+
+    // Nome exibido pela barra de vida do boss. Vazio nos inimigos comuns.
+    get displayName(): string {
+        return '';
+    }
+
     private readonly health: Health;
 
-    private enemyState: EnemyState = 'patrol';
+    protected enemyState: EnemyState = 'patrol';
     protected direction = 1;
     protected patrolMinX: number;
     protected patrolMaxX: number;
@@ -47,20 +72,25 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
     private isPaused = false;
     private pauseTimer: number;
 
-    private hurtTimer = 0;
+    protected hurtTimer = 0;
     protected attackCooldownUntil = 0;
 
     // Garante que o inimigo não receba mais de um dano no mesmo frame (várias
     // hitboxes/contatos resolvidos no mesmo tick).
     private lastDamageFrame = -1;
 
+    // Lentidão aplicada de fora (magia de gelo do cajado). Multiplica TODA
+    // velocidade pedida pelo inimigo — ver setVelocityX/setVelocityY abaixo.
+    private chillFactor = 1;
+    private chillTimer = 0;
+
     protected constructor(
         scene: Scene,
         x: number,
         y: number,
-        typeKey: EnemyType,
+        typeKey: string,
         target: Player,
-        stats: EnemyTypeStats = ENEMY_STATS[typeKey],
+        stats: EnemyStatsShape,
         scale = 3
     ) {
         super(scene, x, y, `${typeKey}-idle`, 0);
@@ -74,7 +104,12 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
 
         this.setScale(scale);
 
-        this.health = new Health(this.stats.hp, { defense: this.stats.defense, resistance: this.stats.resistance });
+        // A dificuldade entra AQUI, e não na tabela de stats: ENEMY_STATS é
+        // dado estático compartilhado, e escalá-lo mutaria a tabela para a
+        // sessão inteira — trocar de dificuldade no menu sem recarregar a
+        // página empilharia multiplicador em cima de multiplicador.
+        const maxHp = Math.max(1, Math.round(this.stats.hp * getDifficultyModifiersFor(scene).enemyHealth));
+        this.health = new Health(maxHp, { defense: this.stats.defense, resistance: this.stats.resistance });
 
         // Dimensões medidas a partir do bounding box real do sprite de cada
         // tipo (ver ENEMY_STATS[type].body), em vez de um corpo genérico.
@@ -119,10 +154,42 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
         return this;
     }
 
+    // Lentidão de efeito (onda de gelo). Não empilha: fica valendo o fator mais
+    // forte e a maior duração restante, pelo mesmo motivo do slow do jogador —
+    // senão duas magias seguidas congelariam o inimigo indefinidamente.
+    applyChill(factor: number, durationMs: number): void {
+        if (this.enemyState === 'dead') {
+            return;
+        }
+
+        this.chillFactor = Math.min(this.chillFactor, factor);
+        this.chillTimer = Math.max(this.chillTimer, durationMs);
+    }
+
+    get isChilled(): boolean {
+        return this.chillTimer > 0;
+    }
+
+    // A lentidão é aplicada aqui, e não em cada uso de patrolSpeed/chaseSpeed,
+    // porque cada subclasse tem a própria velocidade (rolo do ouriço, mergulho
+    // do morcego, bote da aranha) e todas passam por setVelocity*. O knockback
+    // escapa de propósito: ele é escrito direto em `arcadeBody.setVelocity`,
+    // então um inimigo lento continua sendo arremessado com força normal.
+    setVelocityX(x: number): this {
+        return super.setVelocityX(x * this.chillFactor);
+    }
+
+    setVelocityY(y: number): this {
+        return super.setVelocityY(y * this.chillFactor);
+    }
+
     update(time: number, delta: number): void {
         if (this.enemyState === 'dead') {
             return;
         }
+
+        this.updateChill(delta);
+        this.keepAboveFloor();
 
         if (this.enemyState === 'hurt') {
             this.updateHurt(delta);
@@ -191,8 +258,7 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
                 (source.knockbackX ?? 0) * direction,
                 source.knockbackY ?? -120
             );
-            this.setTint(0xff7d6e);
-            this.setTintFill();
+            this.flashOnHit();
             this.play(`${this.typeKey}-idle`, true);
         }
 
@@ -216,9 +282,41 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
         const away = this.x >= this.target.x ? 1 : -1;
         this.arcadeBody.setVelocity(PLAYER_PARRY.staggerKnockbackX * away, PLAYER_PARRY.staggerKnockbackY);
 
-        this.setTint(0xfff2a8);
-        this.setTintFill();
+        this.fillTint(0xfff2a8);
         this.play(`${this.typeKey}-idle`, true);
+    }
+
+    // Rede de segurança contra uma regra do próprio Arcade: quando um corpo
+    // penetra um estático mais fundo do que ele andou naquele frame (mais o
+    // OVERLAP_BIAS), a separação é simplesmente DESCARTADA — e o corpo passa a
+    // afundar sem nada para segurá-lo. É assim que um inimigo grande, empurrado
+    // contra a quina de uma plataforma, termina embaixo do chão e só para no
+    // limite do mundo (foi o que aconteceu com o boss da floresta).
+    //
+    // O chão é uma linha reta em GROUND_Y em todas as fases, então "nunca abaixo
+    // dele" é sempre verdade e a correção cabe em três linhas. Voadores também
+    // passam por aqui de propósito: um morcego empurrado para dentro do terreno
+    // tinha o mesmo destino.
+    // Tint em modo FILL: a cor SUBSTITUI a textura (respeitando o alfa), que é
+    // o que faz o clarão branco do acerto ser lido num frame só. Existe como
+    // método porque o Phaser 4 removeu `setTintFill()` — chamar o antigo não
+    // pintava nada e ainda cuspia erro no console a cada golpe.
+    private fillTint(color: number): void {
+        this.setTint(color);
+        this.setTintMode(TintModes.FILL);
+    }
+
+    private keepAboveFloor(): void {
+        const body = this.arcadeBody;
+        if (body.bottom <= GROUND_Y) {
+            return;
+        }
+
+        this.y -= body.bottom - GROUND_Y;
+        body.updateFromGameObject();
+        if (body.velocity.y > 0) {
+            body.setVelocityY(0);
+        }
     }
 
     protected get arcadeBody(): Physics.Arcade.Body {
@@ -341,6 +439,41 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
         });
     }
 
+    // Clarão BRANCO no instante do acerto, virando vermelho logo em seguida.
+    // O branco é o que torna o acerto legível num frame só; o vermelho que já
+    // existia sozinho se confundia com a própria paleta de vários inimigos.
+    private flashOnHit(): void {
+        this.fillTint(0xffffff);
+
+        this.scene.time.delayedCall(70, () => {
+            if (this.enemyState === 'dead' || !this.active) {
+                return;
+            }
+            this.fillTint(0xff7d6e);
+        });
+    }
+
+    private updateChill(delta: number): void {
+        if (this.chillTimer <= 0) {
+            return;
+        }
+
+        this.chillTimer -= delta;
+        if (this.chillTimer <= 0) {
+            this.chillFactor = 1;
+            if (this.enemyState !== 'hurt') {
+                this.clearTint();
+            }
+            return;
+        }
+
+        // O azul do gelo só pinta fora do hitstun: o clarão do acerto tem
+        // prioridade, senão bater num inimigo congelado não daria retorno.
+        if (this.enemyState !== 'hurt') {
+            this.setTint(0x9ad8ff);
+        }
+    }
+
     private updateHurt(delta: number): void {
         // Durante o estado hurt a física continua, mantendo o recuo. Ao fim da
         // janela o inimigo volta a decidir patrulha/perseguição/ataque.
@@ -353,23 +486,58 @@ export abstract class BaseEnemy extends Physics.Arcade.Sprite {
 
     private die(direction: number, source: DamageSource): void {
         this.enemyState = 'dead';
-        this.setTint(0xffd6d6);
-        this.setTintFill();
+        this.fillTint(0xffffff);
 
         const body = this.arcadeBody;
         body.enable = false;
 
+        // Avisa o resto do jogo ANTES do tween: o onComplete dele chama
+        // destroy(), e um evento emitido de lá chegaria depois de o objeto (e
+        // seus listeners) já terem sumido. Vai em scene.events, e não no
+        // próprio sprite, para quem escuta não precisar assinar inimigo por
+        // inimigo no momento do spawn.
+        const payload: EnemyDiedEvent = {
+            x: this.x,
+            y: this.y,
+            type: this.typeKey,
+            isBoss: this.isBossEnemy()
+        };
+        this.scene.events.emit('enemy:died', payload);
+
         // Reação de morte com recuo do golpe para vender o impacto.
         const recoil = source.knockbackX ? Math.sign(source.knockbackX) * 36 : 36;
+        const baseScale = this.scaleX;
+
+        // Pop antes de sumir: o corpo INCHA e clareia por um instante, depois
+        // encolhe e some. Sumir direto no fade lia como o inimigo "apagando",
+        // sem nenhum instante de morte.
+        this.scene.tweens.add({
+            targets: this,
+            scaleX: baseScale * 1.35,
+            scaleY: baseScale * 1.35,
+            duration: 90,
+            ease: 'Quad.out',
+            yoyo: false
+        });
 
         this.scene.tweens.add({
             targets: this,
             x: this.x + direction * recoil,
-            y: this.y - 18,
+            y: this.y - 22,
             alpha: 0,
-            duration: 220,
+            duration: 300,
+            delay: 60,
             ease: 'Quad.out',
             onComplete: () => this.destroy()
+        });
+
+        this.scene.tweens.add({
+            targets: this,
+            scaleX: baseScale * 0.4,
+            scaleY: baseScale * 0.4,
+            duration: 240,
+            delay: 110,
+            ease: 'Back.in'
         });
     }
 }

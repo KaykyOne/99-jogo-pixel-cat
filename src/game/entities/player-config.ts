@@ -49,7 +49,21 @@ export const PLAYER_CLIMB = {
     upSpeed: 190,
     downSpeed: 260,
     mantleVelocityY: -600,
-    mantlePushX: 120,
+    // Empurrão lateral que joga o jogador PARA CIMA DA BORDA no fim da
+    // escalada. 120 não dava: com moveX zerado, airDeceleration (600 px/s²)
+    // apagava o impulso em ~0,2s, o que rende uns 12px — menos que a metade
+    // da parede. Ele subia até o topo, não cruzava a borda e caía de volta.
+    // 340 sobrevive ~0,55s e cobre os ~80px necessários.
+    mantlePushX: 340,
+    // Por quanto tempo o empurrão lateral do mantle é SUSTENTADO. Aplicá-lo uma
+    // vez só não funciona: no frame do impulso o corpo ainda está encostado na
+    // parede, e a separação do collider zera a velocidade horizontal na hora.
+    // Quando o corpo finalmente passa da borda, já não sobrou empurrão nenhum.
+    mantleDurationMs: 380,
+    // Depois de subir na borda, quanto tempo a parede fica "surda" para um
+    // novo agarre — senão a tecla ainda pressionada prende de novo na mesma
+    // parede e o jogador não consegue sair de cima dela.
+    regripBlockMs: 260,
     // Empurrão constante contra a parede que mantém o contato vivo (ver
     // PlayerClimb). ~1px por frame, anulado pela separação do collider.
     wallStickSpeed: 60

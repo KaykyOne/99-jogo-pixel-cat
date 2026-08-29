@@ -36,7 +36,17 @@ const config: Types.Core.GameConfig = {
 };
 
 const StartGame = (parent: string) => {
-    return new Game({ ...config, parent });
+    const game = new Game({ ...config, parent });
+
+    // Só no dev: dá acesso à instância pelo console do navegador
+    // (`__game.scene.getScene('forest')`), que é como se inspeciona corpo,
+    // inventário e máquina de estados sem encher o código de log. O build de
+    // produção elimina este trecho: `import.meta.env.DEV` vira `false` literal.
+    if (import.meta.env.DEV) {
+        (window as unknown as { __game?: Game }).__game = game;
+    }
+
+    return game;
 }
 
 export default StartGame;

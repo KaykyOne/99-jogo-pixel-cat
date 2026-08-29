@@ -1,24 +1,40 @@
 import { GameObjects, Geom, Input, Physics, Scene } from 'phaser';
 
+// === [A: combate] ===
+import { CombatHud } from '../combat/CombatHud';
 import { MeleeHitbox } from '../combat/MeleeHitbox';
 import { ProjectileManager } from '../combat/Projectile';
+import { ProjectileTarget } from '../combat/types';
+import { createBoss } from '../entities/bosses/boss-factory';
+import { BossBase } from '../entities/bosses/BossBase';
+import { ForestBoss } from '../entities/bosses/ForestBoss';
+// === [/A] ===
 import { DamageSource } from '../damage/damage';
-import { BossType, EnemyType } from '../damage/health-config';
+import { EnemyType } from '../damage/health-config';
 import { BaseEnemy } from '../entities/BaseEnemy';
-import { Boss } from '../entities/Boss';
 import { createEnemy } from '../entities/enemy-factory';
 import { Player } from '../entities/Player';
-import { clearSave, Difficulty, loadSave, writeSave } from '../state/save';
+// === [C: itens/economia] ===
+// saveProgress no lugar de writeSave: a cena não monta mais o objeto do save
+// na mão. Todo campo esquecido ali (o inventário, por exemplo) sumia do save na
+// primeira porta atravessada — ver state/save.ts.
+import { EconomySystem } from '../items/EconomySystem';
+import { syncRunInventory } from '../items/run-inventory';
+// === [/C] ===
+import { clearSave, Difficulty, loadSave, saveProgress } from '../state/save';
 import { isPathBlocked, setLineOfSightBlockers } from '../world/line-of-sight';
+// === [B: mundo/vila] ===
+import { NpcManager } from '../world/NpcManager';
+// === [/B] ===
 import {
     drawPlatforms,
     FOREST_WATER_TOP_Y,
     GROUND_Y,
     HEIGHT,
     PHASES,
-    PHASE_WIDTH,
     PhaseDefinition,
-    PlatformDef
+    PlatformDef,
+    TERRAIN
 } from '../world/phases';
 
 type Portal = {
@@ -62,6 +78,9 @@ const DEATH_ANIMATION_MS = 600;
 export class PhaseScene extends Scene {
     private phase: PhaseDefinition;
     private phaseIndex: number;
+    // Largura desta fase. A vila e as fases de combate têm tamanhos
+    // diferentes, então nada na cena pode mais ler a constante global.
+    private readonly phaseWidth: number;
 
     private player!: Player;
     private enemies: BaseEnemy[] = [];
@@ -88,11 +107,42 @@ export class PhaseScene extends Scene {
     private pauseTitle!: GameObjects.Text;
     private pauseHint!: GameObjects.Text;
 
-    // Projéteis vivos da fase (cusparada da lhama, teia da aranha).
+    // Projéteis vivos da fase (cusparada da lhama, teia da aranha, flecha e
+    // magias do jogador).
     private projectiles!: ProjectileManager;
+
+    // === [A: combate] ===
+    // Barra de mana e arma equipada. A cena só instancia e chama update().
+    private combatHud!: CombatHud;
+    // Boss da floresta, guardado para a cena adotar os inimigos que ele invoca
+    // na fase 2 — sem collider e sem entrar em `enemies`, um invocado
+    // atravessaria o chão e nunca contaria para a fase ficar limpa.
+    private forestBoss?: ForestBoss;
+    // Colliders da fase, guardados para poder aplicá-los a um inimigo que
+    // nasce DEPOIS do create (os invocados do boss).
+    private solidColliders: GameObjects.GameObject[] = [];
+    private oneWayColliders: GameObjects.GameObject[] = [];
+    private canLandOnOneWay: (actor: unknown, platform: unknown) => boolean = () => true;
+    // === [/A] ===
+
+    // Paredes escaláveis da fase (ver updateWallProximity).
+    private climbableWalls: GameObjects.GameObject[] = [];
+
+    // === [B: mundo/vila] ===
+    // NPCs, ícone de interação e diálogo da fase. A cena só instancia, chama
+    // update() e consulta isModalOpen.
+    private npcs!: NpcManager;
+    // === [/B] ===
+
+    // === [C: itens/economia] ===
+    // Inventário, HUD de itens, drops e loja. A cena só instancia, chama
+    // update() e consulta isModalOpen.
+    private economy!: EconomySystem;
+    // === [/C] ===
 
     // Textura espelhada do lago, criada apenas na floresta.
     private lakeReflection?: GameObjects.RenderTexture;
+    private wantsLakeReflection = false;
     // Objetos de HUD que o espelho não pode capturar (senão o painel de vida
     // apareceria refletido dentro da água).
     private hudObjects: GameObjects.GameObject[] = [];
@@ -102,6 +152,7 @@ export class PhaseScene extends Scene {
 
         this.phase = phase;
         this.phaseIndex = phaseIndex;
+        this.phaseWidth = phase.width;
     }
 
     create(data: SceneData) {
@@ -117,9 +168,24 @@ export class PhaseScene extends Scene {
         this.mapPhaseNodes = [];
         this.isPaused = false;
         this.lakeReflection = undefined;
+        this.wantsLakeReflection = false;
+        // === [A: combate] ===
+        this.forestBoss = undefined;
+        // === [/A] ===
 
         const difficulty = (this.registry.get('difficulty') as Difficulty) ?? 'normal';
-        writeSave({
+
+        // === [C: itens/economia] ===
+        // ANTES da gravação, e não junto com o resto da montagem: o inventário
+        // vive no registry (global ao jogo) e não zera sozinho ao começar uma
+        // partida nova. Quem decide se ele continua ou morre é o save, e o save
+        // é reescrito na linha seguinte — sincronizar depois disso leria o
+        // estado que acabamos de gravar e o "Novo Jogo" herdaria as moedas da
+        // run anterior.
+        syncRunInventory(this);
+        // === [/C] ===
+
+        saveProgress(this, {
             phaseIndex: this.phaseIndex,
             difficulty,
             clearedPhases: loadSave()?.clearedPhases ?? []
@@ -127,19 +193,19 @@ export class PhaseScene extends Scene {
 
         // Mundo plano de 768px em todas as fases: o terreno simplificado não
         // tem mais nada acima do topo da tela.
-        this.physics.world.setBounds(0, 0, PHASE_WIDTH, HEIGHT);
+        this.physics.world.setBounds(0, 0, this.phaseWidth, HEIGHT);
         // Uma gravidade mais firme deixa os saltos responsivos sem o personagem
         // parecer flutuar.
         this.physics.world.gravity.y = 1400;
 
         // Esta cena desenha APENAS a sua própria fase (x0 = 0).
-        this.phase.draw(this, 0);
+        this.phase.draw(this, 0, this.phaseWidth);
         drawPlatforms(this, this.phase);
 
         this.buildPhysics();
 
         const spawnX =
-            data && typeof data.spawnX === 'number' ? data.spawnX : PHASE_WIDTH / 2;
+            data && typeof data.spawnX === 'number' ? data.spawnX : this.phaseWidth / 2;
 
         this.player = new Player(this, spawnX, GROUND_Y - 80);
         this.player.setDepth(20);
@@ -188,16 +254,19 @@ export class PhaseScene extends Scene {
         // os corpos, e um segundo sobre o mesmo par já não encontraria
         // sobreposição nenhuma para disparar o callback. O lado vem da
         // geometria, não de body.blocked, pelo mesmo motivo de ordem.
-        this.physics.add.collider(this.player, solidColliders, (_playerObj, wallObj) => {
-            const wall = wallObj as GameObjects.GameObject;
-            if (!platformDefOf(wall)?.climbable) {
-                return;
-            }
+        this.physics.add.collider(this.player, solidColliders);
 
-            const wallBody = wall.body as Physics.Arcade.StaticBody;
-            const playerBody = this.player.body as Physics.Arcade.Body;
-            const direction = wallBody.center.x < playerBody.center.x ? -1 : 1;
-            this.player.climb.markTouchingWall(direction, wallBody.top);
+        // Paredes que dão para escalar: toda plataforma sólida com pelo menos um
+        // STEP de altura. NÃO basta a que a fase marcou com `climbable` — com
+        // uma única marcada no jogo inteiro, segurar a tecla em qualquer outro
+        // bloco não fazia nada e a mecânica parecia quebrada. A flag continua
+        // no dado como intenção de level design (é ela que tranca a arena do
+        // boss da floresta). Chão e muros de borda ficam de fora: não têm
+        // `platformDef`, e escalar o fim do mundo não leva a lugar nenhum.
+        this.climbableWalls = staticObjects.filter(object => {
+            const def = platformDefOf(object);
+            const body = object.body as Physics.Arcade.StaticBody;
+            return !!def && def.oneWay !== true && body.height >= TERRAIN.STEP;
         });
         this.physics.add.collider(this.player, oneWayColliders, undefined, canLandOnOneWay);
 
@@ -206,26 +275,57 @@ export class PhaseScene extends Scene {
         this.projectiles = new ProjectileManager(this, this.player, solidColliders);
         this.registry.set('projectiles', this.projectiles);
 
+        // === [A: combate] ===
+        // Os tiros do JOGADOR (flecha, magias) precisam saber em quem bater. É
+        // uma função, e não a lista pronta: o manager nasce antes dos inimigos,
+        // então uma lista capturada aqui nasceria vazia para sempre.
+        this.projectiles.bindTargets(() => this.enemies as unknown as ProjectileTarget[]);
+        // Acerto de tiro reaproveita o MESMO hit-stop/shake do golpe corpo a
+        // corpo, em vez de o sistema de projétil inventar o seu.
+        this.projectiles.onPlayerProjectileHit(() =>
+            this.applyImpactFeel({ hitStopMs: 45, shakeMs: 90, shakeIntensity: 0.004 })
+        );
+        // Efeitos de área sem projétil (onda de gelo do cajado, ver
+        // PlayerWeapons) chegam por evento pelo mesmo caminho.
+        this.events.on('combat:impact', this.applyImpactFeel, this);
+        // === [/A] ===
+
+        // Guardados em campo para os inimigos INVOCADOS em runtime (fase 2 do
+        // boss da floresta) receberem exatamente os mesmos colliders.
+        this.solidColliders = solidColliders;
+        this.oneWayColliders = oneWayColliders;
+        this.canLandOnOneWay = canLandOnOneWay;
+
         this.spawnEnemies();
         this.spawnBoss();
 
         for (const enemy of this.enemies) {
-            this.physics.add.collider(enemy, solidColliders);
-            this.physics.add.collider(enemy, oneWayColliders, undefined, canLandOnOneWay);
-            this.physics.add.collider(
-                this.player,
-                enemy,
-                () => this.handleContactDamage(enemy),
-                // false evita dano e separação física durante o dash.
-                () => !this.player.dash.isDashing,
-                this
-            );
+            this.attachEnemyPhysics(enemy);
         }
 
         // Reinicia a fase quando o jogador morre.
         this.player.once('player-died', () => this.handlePlayerDeath());
 
         this.buildPortals();
+
+        // === [B: mundo/vila] ===
+        // Depois do jogador (precisa dele para medir distância) e antes da HUD,
+        // que já é a última coisa da montagem.
+        this.npcs = new NpcManager(this, this.player, this.phase.npcs ?? []);
+        // === [/B] ===
+
+        // === [C: itens/economia] ===
+        // Depois do jogador (o ímã dos itens caídos mede distância até ele) e
+        // depois de buildPhysics (o LootManager lê os corpos estáticos da cena
+        // para fazer os drops quicarem no chão).
+        //
+        // Não mexe nos controles do jogador: quem abre o modal é o NpcManager
+        // (a loja só é alcançada pelo diálogo), e ele já desliga e devolve o
+        // controle ao receber 'shop:closed'. Duas mãos no mesmo interruptor é
+        // como ele acaba ficando na posição errada.
+        this.economy = new EconomySystem(this, this.player);
+        // === [/C] ===
+
         this.createHud();
         this.createMapOverlay();
         this.createPauseOverlay();
@@ -233,19 +333,28 @@ export class PhaseScene extends Scene {
         this.pauseKey = this.input.keyboard!.addKey(Input.Keyboard.KeyCodes.ESC);
 
         const camera = this.cameras.main;
-        camera.setBounds(0, 0, PHASE_WIDTH, HEIGHT);
+        camera.setBounds(0, 0, this.phaseWidth, HEIGHT);
         camera.startFollow(this.player, true, 0.1, 0.1);
         camera.fadeIn(220, 0, 0, 0);
 
-        if (this.phase.key === 'forest') {
-            this.setupLakeReflection();
-        }
+        // Fase com lago. O RT em si nasce no primeiro update (ver
+        // setupLakeReflection).
+        this.wantsLakeReflection = this.phase.key === 'forest';
 
         // A escala pode mudar enquanto a cena continua ativa. Remove antes de
         // registrar porque scene.restart reutiliza esta mesma instância.
         this.scale.off('resize', this.repositionResponsiveUI, this);
         this.scale.on('resize', this.repositionResponsiveUI, this);
         this.events.once('shutdown', () => {
+            // === [B: mundo/vila] ===
+            // Tween com repeat: -1 (respiração do NPC, flutuação do ícone) que
+            // sobrevive à troca de fase é vazamento clássico.
+            this.npcs.destroy();
+            // === [/B] ===
+            // === [A: combate] ===
+            this.combatHud.destroy();
+            this.events.off('combat:impact', this.applyImpactFeel, this);
+            // === [/A] ===
             this.projectiles.destroyAll();
             this.scale.off('resize', this.repositionResponsiveUI, this);
             this.scale.off('resize', this.resizeLakeReflection, this);
@@ -253,6 +362,34 @@ export class PhaseScene extends Scene {
     }
 
     update(time: number, delta: number) {
+        // === [C: itens/economia] ===
+        // A loja consome TODA tecla e sai — inclusive ESC, que aqui fecha o
+        // painel em vez de pausar (JustDown é consumido na própria Key, que é a
+        // mesma instância de pauseKey). Vem antes do gate do diálogo porque a
+        // loja é aberta A PARTIR dele: com os dois abertos, quem responde tem
+        // que ser o painel que está por cima.
+        if (this.economy.isModalOpen) {
+            this.economy.updateModal();
+            return;
+        }
+        // === [/C] ===
+
+        // === [B: mundo/vila] ===
+        // Diálogo/loja aberto consome TODA tecla e sai: nem ESC, nem M, nem
+        // ataque, nem movimento passam. O gate vem antes da pausa e é
+        // excludente de propósito — togglePause faz `time.paused = true`, e o
+        // efeito de máquina de escrever do diálogo roda em time.addEvent: se
+        // os dois pudessem coexistir, o texto congelaria e o E não responderia.
+        //
+        // O ESC que fecha o diálogo é consumido aqui dentro (JustDown zera a
+        // flag na PRÓPRIA Key, que é a mesma instância de pauseKey), então ele
+        // não vira pausa no frame seguinte.
+        if (this.npcs.isModalOpen) {
+            this.npcs.update();
+            return;
+        }
+        // === [/B] ===
+
         if (Input.Keyboard.JustDown(this.pauseKey)) {
             // ESC fecha primeiro o painel que já está aberto, em vez de
             // empilhar pausa por cima do mapa.
@@ -267,9 +404,30 @@ export class PhaseScene extends Scene {
             return;
         }
 
+        // ANTES do player: é ele quem lê, no próprio update, se há parede ao
+        // alcance para decidir se a tecla de escalar responde.
+        this.updateWallProximity();
+
         this.player.update(time, delta);
         this.refreshHudHp();
         this.updateDashIndicator();
+
+        // === [A: combate] ===
+        // Mana regenera todo frame; o próprio HUD só redesenha quando o valor
+        // muda de passo visível.
+        this.combatHud.update();
+        // === [/A] ===
+
+        // === [B: mundo/vila] ===
+        // Aproximação dos NPCs (ícone "E") e a própria tecla de interagir.
+        // Fase sem NPC nenhum sai daqui na primeira linha.
+        this.npcs.update();
+        // === [/B] ===
+
+        // === [C: itens/economia] ===
+        // Ímã/coleta dos itens caídos e as teclas 1..6 do inventário.
+        this.economy.update();
+        // === [/C] ===
 
         // Verifica, a cada frame, o overlap entre a hitbox ativa do golpe e os
         // inimigos. A hitbox só existe durante os frames de impacto da animação.
@@ -292,6 +450,13 @@ export class PhaseScene extends Scene {
 
         this.projectiles.update();
 
+        // === [A: combate] ===
+        // Antes do teste de fase limpa, e não depois: um invocado que nasceu
+        // neste frame precisa já estar em `enemies` quando a cena pergunta se
+        // sobrou alguém vivo, senão o portal abre no meio da fase 2 do boss.
+        this.adoptBossSummons();
+        // === [/A] ===
+
         if (
             !this.phaseCleared &&
             this.enemies.length > 0 &&
@@ -303,7 +468,10 @@ export class PhaseScene extends Scene {
             const clearedPhases = Array.from(
                 new Set([...(save?.clearedPhases ?? []), this.phaseIndex])
             );
-            writeSave({ phaseIndex: this.phaseIndex, difficulty, clearedPhases });
+            // === [C: itens/economia] ===
+            // saveProgress preserva o inventário; writeSave direto o apagava.
+            saveProgress(this, { phaseIndex: this.phaseIndex, difficulty, clearedPhases });
+            // === [/C] ===
             this.refreshMapNodes();
             this.unlockExitPortal();
         }
@@ -321,8 +489,45 @@ export class PhaseScene extends Scene {
             this.updateMapMarker();
         }
 
-        if (this.lakeReflection) {
+        if (this.wantsLakeReflection) {
             this.updateLakeReflection();
+        }
+    }
+
+    // Marca a parede escalável ao alcance do jogador. Isto era feito no callback
+    // do collider, e por isso só valia enquanto ele estivesse EMPURRANDO contra
+    // a parede: soltar o direcional para apertar a tecla de escalar apagava o
+    // contato no mesmo frame, e a escalada simplesmente não começava. Por
+    // proximidade, chegar perto basta.
+    private updateWallProximity() {
+        const body = this.player.body as Physics.Arcade.Body;
+        const reach = 16;
+
+        for (const wall of this.climbableWalls) {
+            const wallBody = wall.body as Physics.Arcade.StaticBody;
+
+            // Com os pés na altura do topo ele está EM CIMA da plataforma, e
+            // abaixo da base não há parede nenhuma na frente dele.
+            if (body.bottom <= wallBody.top + 4 || body.top >= wallBody.bottom) {
+                continue;
+            }
+
+            const wallLeft = wallBody.x;
+            const wallRight = wallBody.x + wallBody.width;
+            const paredeADireita = body.right >= wallLeft - reach && body.center.x < wallBody.center.x;
+            const paredeAEsquerda = body.left <= wallRight + reach && body.center.x > wallBody.center.x;
+
+            if (!paredeADireita && !paredeAEsquerda) {
+                continue;
+            }
+
+            this.player.climb.markTouchingWall(
+                paredeADireita ? 1 : -1,
+                wallBody.top,
+                wallLeft,
+                wallRight
+            );
+            return;
         }
     }
 
@@ -340,42 +545,105 @@ export class PhaseScene extends Scene {
             forest: [
                 { type: 'spider', x: 500, minX: 300, maxX: 700, count: 2 },
                 // Sobre o degrau de 1 STEP (x 760..980, topo 284).
-                { type: 'hedgehog', x: 870, y: 204, minX: 800, maxX: 940 },
+                { type: 'hedgehog', x: 870, y: GROUND_Y - TERRAIN.STEP - 80, minX: 800, maxX: 940 },
                 // Bando no trecho aberto antes do vão longo.
                 { type: 'spider', x: 1380, minX: 1310, maxX: 1490, count: 3 },
                 // Sobre o monte de 1 STEP após o vão longo (x 1500..1680, topo 284).
-                { type: 'llama', x: 1590, y: 204, minX: 1540, maxX: 1640 }
+                { type: 'llama', x: 1590, y: GROUND_Y - TERRAIN.STEP - 80, minX: 1540, maxX: 1640 },
+
+                // --- Segunda metade da fase ---------------------------
+                // Spawn de chão só em trecho ABERTO: embaixo de uma
+                // plataforma sólida o inimigo nasce enterrado nela.
+                { type: 'spider', x: 2600, minX: 2420, maxX: 2800, count: 3 },
+                // Sobre a plataforma de 2 STEPs (x 2860..3040).
+                { type: 'hedgehog', x: 2950, y: GROUND_Y - TERRAIN.STEP * 2 - 80, minX: 2900, maxX: 3000 },
+                { type: 'llama', x: 3900, minX: 3800, maxX: 4080 }
             ],
             desert: [
                 { type: 'hedgehog', x: 450, minX: 250, maxX: 650 },
                 // A lhama define o deserto: obriga a aprender a fechar
                 // distância contra quem atira e recua.
                 { type: 'llama', x: 1400, minX: 1280, maxX: 1820 },
-                { type: 'llama', x: 2400, minX: 2300, maxX: 2520 }
+                // Reposicionada com a fase esticada: a faixa antiga (2300..2520)
+                // caiu embaixo de uma plataforma nova, e patrulha de chão embaixo
+                // de bloco sólido nasce enterrada nele.
+                { type: 'llama', x: 2120, minX: 2040, maxX: 2200 },
+
+                // --- Segunda metade da fase ---------------------------
+                // Spawn de chão só em trecho ABERTO: embaixo de uma
+                // plataforma sólida o inimigo nasce enterrado nela.
+                { type: 'llama', x: 2540, minX: 2470, maxX: 2610 },
+                // Sobre a plataforma de 1 STEP (x 3320..3560).
+                { type: 'hedgehog', x: 3440, y: GROUND_Y - TERRAIN.STEP - 80, minX: 3360, maxX: 3520 },
+                // Sobre a de 2 STEPs (x 3760..3960).
+                { type: 'llama', x: 3860, y: GROUND_Y - TERRAIN.STEP * 2 - 80, minX: 3800, maxX: 3920 }
             ],
             snow: [
                 { type: 'spider', x: 400, minX: 220, maxX: 600, count: 2 },
                 { type: 'hedgehog', x: 1420, minX: 1240, maxX: 1740 },
-                { type: 'llama', x: 2400, minX: 2300, maxX: 2520 }
+                // Reposicionada com a fase esticada: a faixa antiga (2300..2520)
+                // caiu embaixo de uma plataforma nova, e patrulha de chão embaixo
+                // de bloco sólido nasce enterrada nele.
+                { type: 'llama', x: 2080, minX: 2000, maxX: 2160 },
+
+                // --- Segunda metade da fase ---------------------------
+                // Spawn de chão só em trecho ABERTO: embaixo de uma
+                // plataforma sólida o inimigo nasce enterrado nela.
+                { type: 'hedgehog', x: 2820, minX: 2760, maxX: 2890 },
+                // Sobre a plataforma de 2 STEPs (x 3220..3420).
+                { type: 'llama', x: 3320, y: GROUND_Y - TERRAIN.STEP * 2 - 80, minX: 3260, maxX: 3380 },
+                { type: 'spider', x: 3500, minX: 3440, maxX: 3600, count: 3 },
+                { type: 'bat', x: 4250, y: BAT_FLIGHT_Y, minX: 4180, maxX: 4380 }
             ],
             cave: [
                 // Caverna é o território do morcego e da aranha.
                 { type: 'bat', x: 500, y: BAT_FLIGHT_Y, minX: 260, maxX: 760 },
                 { type: 'bat', x: 1400, y: BAT_FLIGHT_Y, minX: 1160, maxX: 1680 },
                 { type: 'spider', x: 1420, minX: 1180, maxX: 1660, count: 4 },
-                { type: 'hedgehog', x: 2400, minX: 2280, maxX: 2520 }
+                // Reposicionada com a fase esticada: a faixa antiga (2300..2520)
+                // caiu embaixo de uma plataforma nova, e patrulha de chão embaixo
+                // de bloco sólido nasce enterrada nele.
+                { type: 'hedgehog', x: 2040, minX: 1960, maxX: 2120 },
+
+                // --- Segunda metade da fase ---------------------------
+                // Spawn de chão só em trecho ABERTO: embaixo de uma
+                // plataforma sólida o inimigo nasce enterrado nela.
+                { type: 'bat', x: 2700, y: BAT_FLIGHT_Y, minX: 2600, maxX: 2900 },
+                { type: 'spider', x: 3100, minX: 3020, maxX: 3180, count: 4 },
+                // Sobre a plataforma de 2 STEPs (x 3620..3820).
+                { type: 'hedgehog', x: 3720, y: GROUND_Y - TERRAIN.STEP * 2 - 80, minX: 3660, maxX: 3780 },
+                { type: 'bat', x: 4250, y: BAT_FLIGHT_Y, minX: 4200, maxX: 4380 }
             ],
             volcano: [
                 { type: 'llama', x: 400, minX: 220, maxX: 620 },
                 { type: 'hedgehog', x: 1150, minX: 980, maxX: 1340 },
-                { type: 'bat', x: 2200, y: BAT_FLIGHT_Y, minX: 2020, maxX: 2460 }
+                { type: 'bat', x: 2200, y: BAT_FLIGHT_Y, minX: 2020, maxX: 2460 },
+
+                // --- Segunda metade da fase ---------------------------
+                // Spawn de chão só em trecho ABERTO: embaixo de uma
+                // plataforma sólida o inimigo nasce enterrado nela.
+                { type: 'hedgehog', x: 2500, minX: 2440, maxX: 2570 },
+                // Sobre a plataforma de 2 STEPs (x 3280..3480).
+                { type: 'llama', x: 3380, y: GROUND_Y - TERRAIN.STEP * 2 - 80, minX: 3320, maxX: 3440 },
+                { type: 'bat', x: 3600, y: BAT_FLIGHT_Y, minX: 3500, maxX: 3660 },
+                { type: 'llama', x: 4300, minX: 4250, maxX: 4400 }
             ],
             ruins: [
                 { type: 'spider', x: 400, minX: 220, maxX: 600, count: 3 },
                 { type: 'llama', x: 1300, minX: 1220, maxX: 1700 },
                 { type: 'bat', x: 1450, y: BAT_FLIGHT_Y, minX: 1200, maxX: 1740 },
                 // Sobre o degrau de 1 STEP (x 1760..2000, topo 284).
-                { type: 'hedgehog', x: 1880, y: 204, minX: 1800, maxX: 1960 }
+                { type: 'hedgehog', x: 1880, y: GROUND_Y - TERRAIN.STEP - 80, minX: 1800, maxX: 1960 },
+
+                // --- Segunda metade da fase ---------------------------
+                // Spawn de chão só em trecho ABERTO: embaixo de uma
+                // plataforma sólida o inimigo nasce enterrado nela.
+                { type: 'spider', x: 2840, minX: 2770, maxX: 2910, count: 3 },
+                // Sobre a plataforma de 1 STEP (x 3320..3560).
+                { type: 'llama', x: 3440, y: GROUND_Y - TERRAIN.STEP - 80, minX: 3360, maxX: 3520 },
+                { type: 'bat', x: 3980, y: BAT_FLIGHT_Y, minX: 3900, maxX: 4060 },
+                // Sobre a plataforma de 1 STEP (x 4080..4300).
+                { type: 'hedgehog', x: 4190, y: GROUND_Y - TERRAIN.STEP - 80, minX: 4120, maxX: 4260 }
             ]
         };
 
@@ -407,30 +675,77 @@ export class PhaseScene extends Scene {
         }
     }
 
+    // === [A: combate] ===
     private spawnBoss() {
-        const bossByPhase: Record<string, BossType> = {
-            forest: 'spider',
-            desert: 'llama',
-            snow: 'hedgehog',
-            cave: 'spider',
-            volcano: 'hedgehog',
-            ruins: 'llama'
-        };
+        const bossX = this.phaseWidth - 420;
 
-        const type = bossByPhase[this.phase.key];
-        if (!type) {
+        // Indexado por CHAVE de fase, nunca por número: a vila entrou como
+        // PHASES[0] e qualquer índice chumbado apontaria para o boss errado.
+        // As fases sem boss dedicado continuam com o genérico (ver
+        // bosses/boss-factory.ts).
+        const boss = createBoss(this, this.phase.key, bossX, GROUND_Y - 120, this.player);
+        if (!boss) {
             return;
         }
 
-        const bossX = PHASE_WIDTH - 420;
-        // O boss usa escala 5 (em vez de 3 dos inimigos comuns). Ajusta o
-        // centro inicial para que o corpo ampliado comece apoiado no chão,
-        // sem nascer enterrado nele.
-        const boss = new Boss(this, bossX, GROUND_Y - 120, type, this.player);
         boss.setDepth(15);
-        boss.setPatrolRange(bossX - 100, bossX + 100);
+        boss.setPatrolRange(bossX - 260, bossX + 260);
         this.enemies.push(boss);
+        // Só os bosses dedicados têm barra presa à tela; a do boss genérico
+        // flutua sobre a cabeça, é objeto de mundo, e refletir na água é o
+        // comportamento certo para ela.
+        if (boss instanceof BossBase) {
+            this.hudObjects.push(...boss.hudObjects);
+        }
+
+        if (boss instanceof ForestBoss) {
+            this.forestBoss = boss;
+        }
     }
+
+    // Colliders e dano por contato de um inimigo. Extraído do create porque os
+    // invocados do boss nascem no meio da luta e precisam exatamente do mesmo
+    // tratamento — sem isto eles atravessariam o chão.
+    private attachEnemyPhysics(enemy: BaseEnemy) {
+        this.physics.add.collider(enemy, this.solidColliders);
+        this.physics.add.collider(enemy, this.oneWayColliders, undefined, this.canLandOnOneWay);
+        this.physics.add.collider(
+            this.player,
+            enemy,
+            () => this.handleContactDamage(enemy),
+            // false evita dano e separação física durante o dash.
+            () => !this.player.dash.isDashing,
+            this
+        );
+    }
+
+    // Recolhe os inimigos invocados pelo boss da floresta na fase 2 e os adota
+    // como inimigos da fase: senão eles nunca contariam para "fase limpa" e o
+    // portal ficaria trancado mesmo com a arena vazia.
+    private adoptBossSummons() {
+        if (!this.forestBoss) {
+            return;
+        }
+
+        for (const summon of this.forestBoss.collectSummons()) {
+            this.attachEnemyPhysics(summon);
+            this.enemies.push(summon);
+        }
+    }
+
+    // Peso do impacto. Hit-stop e shake vêm da DEFINIÇÃO do golpe (o
+    // finalizador do combo trava mais que o primeiro golpe), em vez de dois
+    // números fixos que davam a mesma sensação a tudo.
+    private applyImpactFeel(feel: { hitStopMs?: number; shakeMs?: number; shakeIntensity?: number }) {
+        const hitStop = feel.hitStopMs ?? 50;
+        if (hitStop > 0) {
+            this.physics.world.pause();
+            this.time.delayedCall(hitStop, () => this.physics.world.resume());
+        }
+
+        this.cameras.main.shake(feel.shakeMs ?? 90, feel.shakeIntensity ?? 0.004);
+    }
+    // === [/A] ===
 
     // Resolve um impacto de golpe: garante que cada inimigo só recebe o golpe uma
     // vez e coordena dano, knockback e os efeitos de game feel (hit-stop e shake).
@@ -467,11 +782,12 @@ export class PhaseScene extends Scene {
 
         this.player.combat.markTargetHit(enemy);
 
-        // Hit-stop breve: congela a simulação para dar peso ao impacto.
-        this.physics.world.pause();
-        this.time.delayedCall(50, () => this.physics.world.resume());
-
-        this.cameras.main.shake(90, 0.004);
+        // === [A: combate] ===
+        // O peso vem da DEFINIÇÃO do golpe: o finalizador do combo trava e
+        // sacode mais que o primeiro. Os dois números fixos que estavam aqui
+        // davam a mesma sensação a tudo.
+        this.applyImpactFeel(attack);
+        // === [/A] ===
     }
 
     // Dano por contato: o jogador recebe o dano do inimigo ao encostar nele.
@@ -524,7 +840,7 @@ export class PhaseScene extends Scene {
 
     private buildPhysics() {
         // Chão sólido da fase.
-        const ground = this.add.rectangle(0, GROUND_Y, PHASE_WIDTH, HEIGHT - GROUND_Y, 0x294b35);
+        const ground = this.add.rectangle(0, GROUND_Y, this.phaseWidth, HEIGHT - GROUND_Y, 0x294b35);
         ground.setOrigin(0, 0);
         ground.setAlpha(0);
         this.physics.add.existing(ground, true);
@@ -535,7 +851,7 @@ export class PhaseScene extends Scene {
         leftWall.setAlpha(0);
         this.physics.add.existing(leftWall, true);
 
-        const rightWall = this.add.rectangle(PHASE_WIDTH, 0, 30, HEIGHT, 0x000000);
+        const rightWall = this.add.rectangle(this.phaseWidth, 0, 30, HEIGHT, 0x000000);
         rightWall.setOrigin(0.5, 0);
         rightWall.setAlpha(0);
         this.physics.add.existing(rightWall, true);
@@ -561,14 +877,26 @@ export class PhaseScene extends Scene {
     private buildPortals() {
         // Portal no fim da fase -> próxima fase.
         if (this.phaseIndex < PHASES.length - 1) {
-            const bx = PHASE_WIDTH - 120;
+            const bx = this.phaseWidth - 120;
             const sprite = this.createPortalSprite(bx);
+            // === [B: mundo/vila] ===
+            // Na zona segura o portal já nasce liberado — e precisa PARECER
+            // liberado, senão o jogador nem tenta atravessar.
+            if (this.phase.safeZone) {
+                sprite.play('portal-active-loop');
+            }
+            // === [/B] ===
             this.portals.push({
                 zoneX: bx,
                 targetKey: PHASES[this.phaseIndex + 1].key,
                 spawnX: 200,
                 direction: 1,
-                requiresClear: true,
+                // === [B: mundo/vila] ===
+                // Zona segura (vila) não tem inimigo, e "limpa" é medido por
+                // matar todos: exigir isso trancaria o jogador nela para
+                // sempre. Ver PhaseDefinition.safeZone.
+                requiresClear: !this.phase.safeZone,
+                // === [/B] ===
                 sprite
             });
         }
@@ -581,7 +909,7 @@ export class PhaseScene extends Scene {
             this.portals.push({
                 zoneX: bx,
                 targetKey: PHASES[this.phaseIndex - 1].key,
-                spawnX: PHASE_WIDTH - 200,
+                spawnX: this.phaseWidth - 200,
                 direction: -1,
                 requiresClear: false,
                 sprite
@@ -671,8 +999,13 @@ export class PhaseScene extends Scene {
             .setDepth(31)
             .setScrollFactor(0);
 
+        // === [B: mundo/vila] === (só o trecho "·  E interagir" no fim da linha)
+        const controlsHint =
+            'A/D mover  ·  W pular  ·  F atacar  ·  Q segurar p/ defender  ·  Espaço dash  ·  Shift na parede: escalar  ·  E interagir';
+        // === [/B] ===
+
         this.controlsText = this.add
-            .text(this.scale.width - 44, 30, 'A/D mover  ·  W pular  ·  F atacar  ·  Q segurar p/ defender  ·  Espaço dash  ·  A/D na parede + W/S escalar', {
+            .text(this.scale.width - 44, 30, controlsHint, {
                 fontFamily: 'monospace',
                 fontSize: '11px',
                 color: '#c0d9b1'
@@ -687,6 +1020,21 @@ export class PhaseScene extends Scene {
             .circle(this.player.x, this.player.y - 60, 6, 0x4ade80)
             .setDepth(21)
             .setStrokeStyle(2, 0xffffff, 0.6);
+
+        // === [A: combate] ===
+        // Encosta logo abaixo do painel de vida (PANEL_Y = 104, contra os 22+74
+        // deste) para os dois lerem como um bloco único de informação. Entra em
+        // hudObjects pelo mesmo motivo que o resto: o reflexo do lago captura a
+        // cena e não pode reproduzir HUD dentro d'água.
+        this.combatHud = new CombatHud(this, this.player);
+        this.hudObjects.push(...this.combatHud.gameObjects);
+        // === [/A] ===
+
+        // === [C: itens/economia] ===
+        // A barra de inventário nasce no create do EconomySystem, antes desta
+        // lista existir — por isso ela entra aqui, e não lá.
+        this.hudObjects.push(...this.economy.hudObjects);
+        // === [/C] ===
     }
 
     private updateDashIndicator() {
@@ -824,6 +1172,18 @@ export class PhaseScene extends Scene {
         graphics.lineStyle(2, isLocked ? 0x59616b : 0x10212b, 0.95);
 
         switch (phaseKey) {
+            // === [B: mundo/vila] ===
+            // Casinha. Sem este case a vila ficaria com ícone invisível no
+            // mapa: o switch não tem default.
+            case 'village':
+                graphics.fillRect(x - 12, y - 4, 24, 18);
+                graphics.strokeRect(x - 12, y - 4, 24, 18);
+                graphics.fillTriangle(x - 16, y - 4, x + 16, y - 4, x, y - 18);
+                graphics.strokeTriangle(x - 16, y - 4, x + 16, y - 4, x, y - 18);
+                graphics.fillStyle(isLocked ? 0x3a3a3a : 0x4a3524, 1);
+                graphics.fillRect(x - 4, y + 4, 8, 10);
+                break;
+            // === [/B] ===
             case 'forest':
                 graphics.fillTriangle(x, y - 17, x - 12, y + 9, x + 12, y + 9);
                 graphics.fillRect(x - 3, y + 7, 6, 7);
@@ -870,6 +1230,9 @@ export class PhaseScene extends Scene {
 
     private mapBiomeColor(phaseKey: string): number {
         switch (phaseKey) {
+            // === [B: mundo/vila] ===
+            case 'village': return 0xc9a227;
+            // === [/B] ===
             case 'forest': return 0x4f9b5a;
             case 'desert': return 0xe0b15c;
             case 'snow': return 0x9ed6f5;
@@ -881,7 +1244,12 @@ export class PhaseScene extends Scene {
     }
 
     // Captura a metade superior da cena e a exibe invertida na metade inferior.
-    private setupLakeReflection() {
+    // O RenderTexture NÃO pode nascer dentro do create(): no Phaser 4 ele sai de
+    // lá com o framebuffer inutilizável — entra no display list, fica visível,
+    // não dá erro nenhum e desenha NADA (testado: um RT idêntico criado um frame
+    // depois desenha normalmente). Por isso a criação é preguiçosa, no primeiro
+    // update, e o resize destrói em vez de redimensionar.
+    private setupLakeReflection(): GameObjects.RenderTexture {
         const width = this.scale.width;
         const height = HEIGHT - FOREST_WATER_TOP_Y;
         const rt = this.add.renderTexture(0, FOREST_WATER_TOP_Y, width, height);
@@ -898,25 +1266,29 @@ export class PhaseScene extends Scene {
         this.lakeReflection = rt;
         this.scale.off('resize', this.resizeLakeReflection, this);
         this.scale.on('resize', this.resizeLakeReflection, this);
+
+        return rt;
     }
 
     private resizeLakeReflection() {
-        if (!this.lakeReflection) {
-            return;
-        }
-
-        // RenderTexture possui um framebuffer próprio. setSize muda só a imagem
-        // exibida; resize mantém a área de captura sincronizada ao viewport.
-        this.lakeReflection.resize(this.scale.width, HEIGHT - FOREST_WATER_TOP_Y);
+        // Descarta e deixa o próximo frame recriar no tamanho novo: `resize()`
+        // mantém o mesmo framebuffer, e é justamente ele que não sobrevive.
+        this.lakeReflection?.destroy();
+        this.lakeReflection = undefined;
     }
 
     private updateLakeReflection() {
-        const rt = this.lakeReflection!;
+        const rt = this.lakeReflection ?? this.setupLakeReflection();
         const camera = this.cameras.main;
 
         rt.clear();
-        // A captura sai do topo do mundo: é a faixa que o espelho reflete.
-        rt.camera.setScroll(camera.scrollX, 0);
+        // A captura sai da faixa imediatamente ACIMA da linha d'água, com a
+        // mesma altura da poça. Capturar a partir do topo do mundo (que era o
+        // que estava aqui) só funcionava por acidente, quando a água ocupava
+        // metade da tela: com ela em um terço, o espelho passou a refletir o
+        // CÉU — os 216px de cima do mundo — e a água virou um azul chapado.
+        const waterHeight = HEIGHT - FOREST_WATER_TOP_Y;
+        rt.camera.setScroll(camera.scrollX, FOREST_WATER_TOP_Y - waterHeight);
 
         const excluded = new Set<GameObjects.GameObject>([
             rt,
@@ -990,7 +1362,7 @@ export class PhaseScene extends Scene {
         const centerX = this.scale.width / 2;
         const mapStartX = centerX - 324;
         const mapEndX = centerX + 324;
-        const phaseProgress = Math.max(0, Math.min(1, this.player.x / PHASE_WIDTH));
+        const phaseProgress = Math.max(0, Math.min(1, this.player.x / this.phaseWidth));
         const worldProgress = (this.phaseIndex + phaseProgress) / (PHASES.length - 1);
 
         this.mapMarker.x = mapStartX + (mapEndX - mapStartX) * worldProgress;

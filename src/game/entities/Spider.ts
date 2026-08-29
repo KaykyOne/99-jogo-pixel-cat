@@ -30,7 +30,7 @@ export class Spider extends BaseEnemy {
     private tackleUntil = 0;
 
     constructor(scene: Scene, x: number, y: number, target: Player) {
-        super(scene, x, y, 'spider', target);
+        super(scene, x, y, 'spider', target, ENEMY_STATS.spider);
     }
 
     protected updateChase(): void {

@@ -10,6 +10,18 @@ export const PLAYER_HEALTH = {
     hurtKnockbackY: -260
 } as const;
 
+// Mana do jogador: recurso exclusivo das magias do cajado. Regenera sozinha,
+// devagar, com um atraso após cada gasto — sem esse atraso a regeneração
+// simplesmente pagaria o custo da magia mais barata em tempo real e o recurso
+// deixaria de ser uma decisão.
+export const PLAYER_MANA = {
+    max: 100,
+    // Pontos por segundo. 12/s recompõe a barra cheia em pouco mais de 8s.
+    regenPerSecond: 12,
+    // Espera após gastar antes de a regeneração voltar a correr.
+    regenDelayMs: 900
+} as const;
+
 // Corpo de colisão por tipo de inimigo, em px de fonte (frames 48x48).
 // Medido a partir do bounding box real de cada sprite (idle/walk); o corpo
 // antigo (42x42 fixo para todos) era bem maior que qualquer um dos dois
@@ -206,14 +218,20 @@ const ENEMY_STATS_TABLE = {
 
         body: { width: 26, height: 18, offsetX: 11, offsetY: 26 } satisfies EnemyBody
     }
-} satisfies Record<string, DamageableStats & {
+} satisfies Record<string, EnemyStatsShape>;
+
+// Forma de uma linha da tabela de stats. Extraída para tipo próprio porque o
+// BaseEnemy passou a aceitar tipos que NÃO estão em ENEMY_STATS (os bosses
+// dedicados de entities/bosses/): indexar `typeof ENEMY_STATS` obrigaria todo
+// boss novo a virar um inimigo comum spawnável, que não é o caso.
+export type EnemyStatsShape = DamageableStats & {
     hp: number;
     patrolSpeed: number;
     contactDamage: DamageSource;
     combat: EnemyCombat;
     body: EnemyBody;
     projectile?: EnemyProjectile;
-}>;
+};
 
 export const ENEMY_STATS = ENEMY_STATS_TABLE;
 export type EnemyType = keyof typeof ENEMY_STATS_TABLE;

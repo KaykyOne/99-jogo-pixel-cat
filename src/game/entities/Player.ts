@@ -1,9 +1,13 @@
 import { Input, Physics, Scene } from 'phaser';
 
 import { PlayerCombat } from '../combat/PlayerCombat';
+import { getDifficultyModifiersFor } from '../config/difficulty';
+import { GROUND_Y } from '../world/phases';
+import { PlayerWeapons } from '../combat/PlayerWeapons';
 import { DamageSource } from '../damage/damage';
 import { Health } from '../damage/Health';
 import { PLAYER_HEALTH } from '../damage/health-config';
+import { Mana } from '../damage/Mana';
 import { PLAYER_BODY, PLAYER_MOVEMENT } from './player-config';
 import { PlayerClimb } from './PlayerClimb';
 import { PlayerDash } from './PlayerDash';
@@ -14,10 +18,24 @@ type PlayerKeys = {
     attack: Input.Keyboard.Key;
     parry: Input.Keyboard.Key;
     dash: Input.Keyboard.Key;
+    // Agarrar/escalar parede. Tecla própria: o Espaço já é o dash.
+    climb: Input.Keyboard.Key;
     right: Input.Keyboard.Key;
     left: Input.Keyboard.Key;
     up: Input.Keyboard.Key;
     down: Input.Keyboard.Key;
+
+    // Troca direta de arma. Z/X/C e não 1/2/3 porque as teclas numéricas
+    // pertencem aos slots do inventário.
+    weaponSword: Input.Keyboard.Key;
+    weaponBow: Input.Keyboard.Key;
+    weaponStaff: Input.Keyboard.Key;
+
+    // Seleção de magia. Ficou SO no R: 1/2/3 são slots do inventário, e
+    // guardar as duas coisas na mesma tecla fazia o 1 lançar a magia E beber a
+    // poção do slot 1 no mesmo frame — os dois sistemas escutam a tecla, e
+    // nenhum consegue "consumir" o input do outro.
+    spellCycle: Input.Keyboard.Key;
 };
 
 type PlayerState = 'alive' | 'hurt' | 'dead';
@@ -26,6 +44,7 @@ export class Player extends Physics.Arcade.Sprite {
     // Componente de combate. Mantido público para que a cena configure o
     // overlap da hitbox ativa e leia o resultado dos impactos.
     readonly combat: PlayerCombat;
+    readonly weapons: PlayerWeapons;
     readonly dash: PlayerDash;
     readonly climb: PlayerClimb;
     readonly parry: PlayerParry;
@@ -34,8 +53,13 @@ export class Player extends Physics.Arcade.Sprite {
 
     private controlsEnabled = true;
 
-    // Vida e estados de dano.
+    // Diálogo/loja aberto (evento 'ui:modal'). Bloqueia TODO input de combate:
+    // sem isto, conversar com um NPC dispararia golpe e magia junto.
+    private modalOpen = false;
+
+    // Vida, mana e estados de dano.
     private readonly health: Health;
+    readonly mana: Mana;
     private playerState: PlayerState = 'alive';
 
     // Janela de invencibilidade após receber dano (com piscada) e o pequeno
@@ -64,6 +88,7 @@ export class Player extends Physics.Arcade.Sprite {
         this.setScale(3);
 
         this.health = new Health(PLAYER_HEALTH.maxHp, { defense: 0, resistance: {} });
+        this.mana = new Mana();
 
         // O corpo do Arcade multiplica o tamanho (fonte) pelo scale do sprite (3x).
         // Dimensões medidas a partir do bounding box real do sprite (ver PLAYER_BODY).
@@ -77,6 +102,7 @@ export class Player extends Physics.Arcade.Sprite {
         this.setCollideWorldBounds(true);
 
         this.combat = new PlayerCombat(scene, this);
+        this.weapons = new PlayerWeapons(scene, this, this.combat, this.mana);
         this.dash = new PlayerDash(scene, this);
         this.climb = new PlayerClimb(this);
         this.parry = new PlayerParry(scene, this);
@@ -85,13 +111,52 @@ export class Player extends Physics.Arcade.Sprite {
             attack: Input.Keyboard.KeyCodes.F,
             parry: Input.Keyboard.KeyCodes.Q,
             dash: Input.Keyboard.KeyCodes.SPACE,
+            climb: Input.Keyboard.KeyCodes.SHIFT,
 
             right: Input.Keyboard.KeyCodes.D,
             left: Input.Keyboard.KeyCodes.A,
 
             up: Input.Keyboard.KeyCodes.W,
-            down: Input.Keyboard.KeyCodes.S
+            down: Input.Keyboard.KeyCodes.S,
+
+            weaponSword: Input.Keyboard.KeyCodes.Z,
+            weaponBow: Input.Keyboard.KeyCodes.X,
+            weaponStaff: Input.Keyboard.KeyCodes.C,
+
+            spellCycle: Input.Keyboard.KeyCodes.R
         }) as PlayerKeys;
+
+        // Contratos com os outros sistemas. Ficam aqui, e não na cena, para o
+        // Game.ts não virar o roteador de eventos de todo mundo.
+        scene.events.on('player:heal', this.onHealEvent, this);
+        scene.events.on('ui:modal', this.onModalEvent, this);
+        scene.events.once('shutdown', () => {
+            scene.events.off('player:heal', this.onHealEvent, this);
+            scene.events.off('ui:modal', this.onModalEvent, this);
+        });
+    }
+
+    // Cura vinda do inventário (poção). Health já resolve o teto de HP.
+    heal(amount: number): void {
+        if (this.playerState === 'dead' || amount <= 0) {
+            return;
+        }
+
+        this.health.heal(amount);
+    }
+
+    private onHealEvent(payload: { amount?: number }): void {
+        this.heal(payload?.amount ?? 0);
+    }
+
+    private onModalEvent(payload: { open?: boolean }): void {
+        this.modalOpen = payload?.open === true;
+
+        // Fecha qualquer intenção pendente: com o diálogo abrindo no mesmo
+        // frame em que F foi apertado, o golpe sairia por trás do painel.
+        if (this.modalOpen) {
+            this.weapons.clearBuffer();
+        }
     }
 
     get currentHp(): number {
@@ -115,6 +180,9 @@ export class Player extends Physics.Arcade.Sprite {
         this.updateInvulnerability(delta);
         this.updateHurt(delta);
         this.updateSlow(delta);
+        // A mana regenera mesmo com o controle desligado (teleporte, diálogo):
+        // ela é um relógio, não uma ação do jogador.
+        this.mana.update(delta);
 
         if (!this.controlsEnabled) {
             this.setVelocity(0, 0);
@@ -124,30 +192,43 @@ export class Player extends Physics.Arcade.Sprite {
         }
 
         const dt = delta / 1000;
+        this.keepAboveFloor();
         const onGround = this.arcadeBody.blocked.down;
 
-        // Segurar o direcional CONTRA a parede é o que prende na escalada;
-        // W/S sobem e descem enquanto agarrado.
+        // Lido AGORA porque climb.update() consome a marcação do collider: o
+        // teste do dash, mais abaixo, precisa do valor deste frame.
+        const nearClimbableWall = this.climb.isTouchingWall;
+        // SHIFT encostado na parede escala. É a forma primária: chegar, segurar
+        // e subir. Segurar o direcional CONTRA a parede continua valendo, e W/S
+        // seguem dando o controle fino de subir e descer.
+        const holdingClimbKey = this.keys.climb.isDown && nearClimbableWall;
         const holdingIntoWall =
+            holdingClimbKey ||
             (this.climb.touchingWallDirection === -1 && this.keys.left.isDown) ||
             (this.climb.touchingWallDirection === 1 && this.keys.right.isDown);
-        const climbInput =
-            (this.keys.up.isDown ? -1 : 0) + (this.keys.down.isDown ? 1 : 0);
+        // Sem W/S, o Shift sozinho já sobe — senão o jogador ficaria pendurado
+        // sem entender que falta uma segunda tecla.
+        const manualClimb = (this.keys.up.isDown ? -1 : 0) + (this.keys.down.isDown ? 1 : 0);
+        const climbInput = manualClimb !== 0 ? manualClimb : holdingClimbKey ? -1 : 0;
 
         this.updateTimers(delta, onGround);
         this.parry.update(time, this.keys.parry.isDown);
         this.dash.update(time);
         // O dash controla o corpo inteiro (inclusive a gravidade) enquanto dura.
         if (!this.dash.isDashing) {
-            this.climb.update(onGround, holdingIntoWall, climbInput);
+            this.climb.update(onGround, holdingIntoWall, climbInput, delta);
         }
         this.combat.update(this.currentAnimFrameIndex);
+        this.handleWeaponSwitch();
 
         // Durante o hitstun o jogador não pode atacar nem pular; apenas sofre o
         // recuo do knockback.
-        if (this.hurtTimer <= 0 && !this.combat.isAttacking) {
+        if (this.hurtTimer <= 0 && !this.isSwinging) {
             // O dash é permitido no ar. Um ataque já iniciado não é
             // interrompido, preservando o ciclo da hitbox de combate.
+            // O dash vale em qualquer lugar, inclusive colado na parede: com a
+            // escalada no Shift, as duas ações deixaram de disputar a tecla.
+            // Dar dash agarrado larga a parede de propósito — é a saída rápida.
             if (Input.Keyboard.JustDown(this.keys.dash)) {
                 // Larga a parede antes: senão a escalada devolveria a gravidade
                 // por cima do dash, que a desliga logo em seguida.
@@ -168,9 +249,10 @@ export class Player extends Physics.Arcade.Sprite {
         if (
             this.hurtTimer <= 0 &&
             onGround &&
+            !this.modalOpen &&
             !this.dash.isDashing &&
             !this.climb.isGripping &&
-            !this.combat.isAttacking &&
+            !this.isSwinging &&
             this.keys.parry.isDown
         ) {
             this.parry.attempt(time);
@@ -198,8 +280,10 @@ export class Player extends Physics.Arcade.Sprite {
         } else if (this.climb.isGripping) {
             // PlayerClimb controla os dois eixos; aqui só encara a parede.
             this.setFlipX(this.climb.touchingWallDirection < 0);
-        } else if (this.combat.isAttacking) {
+        } else if (this.isSwinging && onGround) {
             // O golpe interrompe o deslocamento horizontal durante a animação.
+            // Só no CHÃO: no ar, travar o X mataria o impulso do pulo no meio e
+            // o ataque aéreo viraria uma queda vertical.
             this.setVelocityX(0);
         } else if (this.hurtTimer > 0) {
             // Hitstun: mantém o recuo do knockback sem aplicar controle
@@ -207,7 +291,9 @@ export class Player extends Physics.Arcade.Sprite {
         } else {
             const moveX = (this.keys.right.isDown ? 1 : 0) - (this.keys.left.isDown ? 1 : 0);
 
-            if (moveX !== 0) {
+            // Virar no meio de um golpe aéreo deixaria o sprite olhando para um
+            // lado e a hitbox (cuja direção é travada na criação) para o outro.
+            if (moveX !== 0 && !this.isSwinging) {
                 this.setFlipX(moveX < 0);
             }
 
@@ -244,6 +330,23 @@ export class Player extends Physics.Arcade.Sprite {
         return this.slowTimer > 0;
     }
 
+    // Mesma rede de segurança dos inimigos (ver BaseEnemy.keepAboveFloor): o
+    // Arcade DESCARTA a separação quando a penetração passa do que o corpo andou
+    // no frame, e a partir daí nada segura a queda. Com o jogador isso é pior
+    // que um bug visual: ele cai para fora do mundo e a run acaba ali.
+    private keepAboveFloor(): void {
+        const body = this.arcadeBody;
+        if (body.bottom <= GROUND_Y) {
+            return;
+        }
+
+        this.y -= body.bottom - GROUND_Y;
+        body.updateFromGameObject();
+        if (body.velocity.y > 0) {
+            body.setVelocityY(0);
+        }
+    }
+
     // Aplica dano ao jogador. Retorna true se o dano foi efetivamente recebido.
     // `direction` (1 = direita, -1 = esquerda) indica o sentido do recuo.
     takeDamage(source: DamageSource, direction: number, attacker?: Parryable): boolean {
@@ -265,7 +368,16 @@ export class Player extends Physics.Arcade.Sprite {
             return false;
         }
 
-        const damage = this.health.takeDamage(source);
+        // Dificuldade aplicada na ENTRADA do dano, um ponto só: contato,
+        // projétil e boss chegam todos por aqui, então nenhuma fonte precisa
+        // lembrar de multiplicar (e nenhuma pode esquecer). O mínimo de 1
+        // impede que um arredondamento para baixo torne um golpe inofensivo.
+        const scaled: DamageSource = {
+            ...source,
+            amount: Math.max(1, Math.round(source.amount * getDifficultyModifiersFor(this.scene).incomingDamage))
+        };
+
+        const damage = this.health.takeDamage(scaled);
         if (damage <= 0) {
             return false;
         }
@@ -379,7 +491,7 @@ export class Player extends Physics.Arcade.Sprite {
         if (
             this.jumpBufferTimer > 0 &&
             this.coyoteTimer > 0 &&
-            !this.combat.isAttacking
+            !this.isSwinging
         ) {
             this.jump();
             this.jumpBufferTimer = 0;
@@ -387,10 +499,47 @@ export class Player extends Physics.Arcade.Sprite {
         }
     }
 
+    // Ocupado em qualquer forma de ataque: golpe corpo-a-corpo, flechada ou
+    // conjuração. Ponto único, porque o Player consulta este estado em seis
+    // lugares diferentes e esquecer um deles trava o personagem.
+    private get isSwinging(): boolean {
+        return this.weapons.isBusy;
+    }
+
     private handleAttack(time: number, onGround: boolean) {
+        if (this.modalOpen) {
+            return;
+        }
+
+        // Só REGISTRA a intenção. Quem executa é o update do PlayerWeapons, a
+        // cada frame, consumindo o buffer assim que a arma libera — é o que
+        // salva o golpe apertado um instante cedo demais.
         if (Input.Keyboard.JustDown(this.keys.attack)) {
-            // O componente valida cooldown, estado e se está no chão.
-            this.combat.attemptAttack(time, onGround);
+            this.weapons.queueAttack(time);
+        }
+
+        this.weapons.update(time, onGround);
+    }
+
+    // Troca de arma (Z/X/C) e seleção de magia (1/2/3, ou R para ciclar).
+    // As numéricas são compartilhadas com os slots do inventário: por isso
+    // PlayerWeapons ignora a seleção quando o cajado NÃO está equipado, e R
+    // existe como caminho sem nenhuma disputa.
+    private handleWeaponSwitch() {
+        if (this.modalOpen) {
+            return;
+        }
+
+        if (Input.Keyboard.JustDown(this.keys.weaponSword)) {
+            this.weapons.equip('sword');
+        } else if (Input.Keyboard.JustDown(this.keys.weaponBow)) {
+            this.weapons.equip('bow');
+        } else if (Input.Keyboard.JustDown(this.keys.weaponStaff)) {
+            this.weapons.equip('staff');
+        }
+
+        if (Input.Keyboard.JustDown(this.keys.spellCycle)) {
+            this.weapons.cycleSpell();
         }
     }
 
@@ -455,7 +604,7 @@ export class Player extends Physics.Arcade.Sprite {
 
     // Lógica de animação: só decide qual animação tocar com base no estado.
     private updateAnimation(onGround: boolean) {
-        if (this.dash.isDashing || this.combat.isAttacking) {
+        if (this.dash.isDashing || this.isSwinging) {
             return;
         }
 
