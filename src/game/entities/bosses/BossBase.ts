@@ -2,7 +2,7 @@ import { GameObjects, Math as PhaserMath, Scene } from 'phaser';
 
 import { BaseEnemy } from '../BaseEnemy';
 import { Player } from '../Player';
-import { BossDefinition, BossPatternDef } from './boss-config';
+import { BOSS_INTROS_SEEN_KEY, BossDefinition, BossPatternDef } from './boss-config';
 
 // Etapas de um padrão. É esta separação em três tempos que diferencia um boss
 // de um inimigo comum com muita vida: o jogador SEMPRE tem uma janela para ler
@@ -15,6 +15,19 @@ const ENGAGE_DISTANCE = 620;
 
 const BAR_WIDTH = 360;
 const BAR_HEIGHT = 16;
+
+// Respiro entre fechar a fala de abertura e o primeiro golpe: fechar o
+// diálogo e já levar uma investida na cara seria injusto.
+const POST_INTRO_GRACE_MS = 700;
+
+// Payload de 'boss:intro'. A cena abre o diálogo, pausa o mundo e chama
+// onDone ao fechar — o boss não conhece a caixa de diálogo.
+export type BossIntroRequest = {
+    speaker: string;
+    lines: string[];
+    bossX: number;
+    onDone: () => void;
+};
 
 // Base dos bosses dedicados: máquina de estados com padrões alternados,
 // telegrafo visível, duas fases de luta e barra de vida com nome.
@@ -39,6 +52,9 @@ export abstract class BossBase extends BaseEnemy {
     // Marca que o efeito de execução já saiu neste padrão (o golpe acontece
     // uma vez, não a cada frame da janela de execução).
     private executed = false;
+    // Fala de abertura: 'pending' até o jogador chegar perto, 'playing'
+    // enquanto o diálogo está aberto, 'done' libera os padrões.
+    private introState: 'pending' | 'playing' | 'done' = 'pending';
 
     private readonly barBg: GameObjects.Rectangle;
     private readonly barFill: GameObjects.Rectangle;
@@ -113,6 +129,11 @@ export abstract class BossBase extends BaseEnemy {
     // a partir daqui a máquina de estados do boss assume o controle.
     protected updateAttack(time: number): void {
         const delta = this.scene.game.loop.delta;
+        if (this.introState !== 'done') {
+            this.updateIntro(time, delta);
+            return;
+        }
+
         const scale = this.bossPhase === 2 ? this.definition.phase2TimeScale : 1;
 
         switch (this.stage) {
@@ -202,6 +223,47 @@ export abstract class BossBase extends BaseEnemy {
     }
 
     // --- Coreografia --------------------------------------------------------
+    // Antes do primeiro golpe: patrulha até o jogador entrar no campo de visão
+    // (a mesma distância que acende a barra) e então pede a fala de abertura.
+    private updateIntro(time: number, delta: number): void {
+        if (this.introState === 'playing') {
+            this.setVelocityX(0);
+            return;
+        }
+
+        const seen = (this.scene.registry.get(BOSS_INTROS_SEEN_KEY) as string[] | undefined) ?? [];
+        // Sem ninguém ouvindo o evento, a fala nunca fecharia e o boss ficaria
+        // parado para sempre: nesse caso a luta começa direto.
+        if (seen.includes(this.definition.key) || this.scene.events.listenerCount('boss:intro') === 0) {
+            this.finishIntro(time);
+            return;
+        }
+
+        if (this.distanceToTarget > ENGAGE_DISTANCE) {
+            this.updatePatrol(delta);
+            return;
+        }
+
+        this.scene.registry.set(BOSS_INTROS_SEEN_KEY, [...seen, this.definition.key]);
+        this.introState = 'playing';
+        this.setVelocityX(0);
+        this.setFlipX(this.facingDirection < 0);
+        this.play(`${this.artAnimationPrefix}-idle`, true);
+
+        const request: BossIntroRequest = {
+            speaker: this.definition.name,
+            lines: this.definition.intro,
+            bossX: this.x,
+            onDone: () => this.finishIntro(this.scene.game.loop.time)
+        };
+        this.scene.events.emit('boss:intro', request);
+    }
+
+    private finishIntro(time: number): void {
+        this.introState = 'done';
+        this.nextPatternAt = time + POST_INTRO_GRACE_MS;
+    }
+
     private runIdle(time: number): void {
         const direction = this.facingDirection;
         this.setFlipX(direction < 0);

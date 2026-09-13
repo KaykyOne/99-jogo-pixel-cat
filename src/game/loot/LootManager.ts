@@ -4,10 +4,15 @@ const { Clamp } = PhaserMath;
 const { Distance } = PhaserMath;
 
 import { getDifficultyModifiersFor } from '../config/difficulty';
+import { CoinSystem } from '../items/CoinSystem';
 import { Inventory } from '../items/Inventory';
-import { ItemId, ITEMS } from '../items/item-catalog';
+import { ItemId, ITEMS, isItemId } from '../items/item-catalog';
 import { EnemyDiedInfo, lootTableFor, rollLoot } from './loot-table';
 import { Pickup, PICKUP_CONFIG } from './Pickup';
+
+// Item descartado nasce no jogador: fica fora do ímã este tempo, o bastante
+// para ele se afastar em vez de recolher o que acabou de largar.
+const DROP_PICKUP_DELAY_MS = 1500;
 
 // Posição do jogador. Tipo estrutural de propósito: o loot não precisa (e não
 // deve) importar a classe Player, que é de outro agente.
@@ -41,7 +46,8 @@ export class LootManager {
     constructor(
         private readonly scene: Scene,
         private readonly target: TargetPosition,
-        private readonly inventory: Inventory
+        private readonly inventory: Inventory,
+        private readonly coins: CoinSystem
     ) {
         this.lootMultiplier = getDifficultyModifiersFor(scene).lootQuantity;
 
@@ -58,6 +64,7 @@ export class LootManager {
         // scene.events (e não no inimigo) é o que permite ao loot funcionar sem
         // segurar referência a um objeto que já está a caminho do destroy().
         this.scene.events.on('enemy:died', this.handleEnemyDied, this);
+        this.scene.events.on('drop:item', this.handleDropItem, this);
         this.scene.events.once('shutdown', () => this.destroyAll());
     }
 
@@ -73,10 +80,11 @@ export class LootManager {
         this.spawn(roll.id, roll.quantity, info.x, info.y);
     }
 
-    spawn(id: ItemId, quantity: number, x: number, y: number): void {
+    spawn(id: ItemId, quantity: number, x: number, y: number): Pickup {
         const pickup = new Pickup(this.scene, x, y, id, quantity);
         this.scene.physics.add.collider(pickup, this.solids);
         this.pickups.push(pickup);
+        return pickup;
     }
 
     // Ímã + coleta. Percorre de trás para frente porque a coleta remove da
@@ -102,6 +110,7 @@ export class LootManager {
 
     destroyAll(): void {
         this.scene.events.off('enemy:died', this.handleEnemyDied, this);
+        this.scene.events.off('drop:item', this.handleDropItem, this);
 
         for (const pickup of this.pickups) {
             pickup.destroy();
@@ -132,8 +141,28 @@ export class LootManager {
         this.dropFrom(info);
     }
 
+    private handleDropItem(payload: unknown): void {
+        if (!payload || typeof payload !== 'object') {
+            return;
+        }
+
+        const data = payload as { itemId?: unknown; x?: unknown; y?: unknown; quantity?: unknown };
+        if (!isItemId(data.itemId) || typeof data.x !== 'number' || typeof data.y !== 'number') {
+            return;
+        }
+
+        const quantity = typeof data.quantity === 'number' ? data.quantity : 1;
+        this.spawn(data.itemId, quantity, data.x, data.y).blockCollection(DROP_PICKUP_DELAY_MS);
+    }
+
     private collect(pickup: Pickup, index: number): void {
-        const leftover = this.inventory.add(pickup.itemId, pickup.amount);
+        // Moedas não ocupam espaço: vão direto para o CoinSystem.
+        let leftover = 0;
+        if (pickup.itemId === 'coin') {
+            this.coins.add(pickup.amount);
+        } else {
+            leftover = this.inventory.add(pickup.itemId, pickup.amount);
+        }
 
         if (leftover >= pickup.amount) {
             // Nada coube: o item CONTINUA no chão, com a quantidade intacta.

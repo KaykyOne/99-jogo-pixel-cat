@@ -30,9 +30,16 @@ export type BossPatternDef = {
     maxRange: number;
 };
 
+// Registry: bosses cuja fala de abertura já foi vista nesta run. Morrer e
+// voltar no Normal não repete a fala; o menu apaga a lista no Novo Jogo.
+export const BOSS_INTROS_SEEN_KEY = 'boss-intros-seen';
+
 export type BossDefinition = {
     key: BossKey;
     name: string;
+    // Fala de abertura: o jogo pausa quando o boss nota o jogador, antes do
+    // primeiro golpe. Curta de propósito — uma página por linha.
+    intro: string[];
     // Chave da arte gerada (ver entities/art/boss-art.ts).
     artKey: string;
     scale: number;
@@ -143,6 +150,10 @@ export const BOSSES: Record<BossKey, BossDefinition> = {
     forest: {
         key: 'forest',
         name: 'GUARDIÃO DO CARVALHO',
+        intro: [
+            'Mais um pé pisando a minha mata...',
+            'Essas raízes guardam a floresta há mil anos. Você não passa delas.'
+        ],
         artKey: 'boss-forest',
         scale: 4.5,
 
@@ -203,6 +214,10 @@ export const BOSSES: Record<BossKey, BossDefinition> = {
     desert: {
         key: 'desert',
         name: 'SENTINELA DAS DUNAS',
+        intro: [
+            'A areia me contou que você vinha.',
+            'E ela também já sabe onde vai te enterrar.'
+        ],
         artKey: 'boss-desert',
         scale: 4.2,
 
@@ -255,6 +270,10 @@ export const BOSSES: Record<BossKey, BossDefinition> = {
     snow: {
         key: 'snow',
         name: 'COLOSSO DE GELO',
+        intro: [
+            'Ninguém sobe estes picos e volta aquecido.',
+            'Fica. Vira gelo junto comigo.'
+        ],
         artKey: 'boss-snow',
         scale: 4.6,
 

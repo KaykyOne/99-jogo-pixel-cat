@@ -2,7 +2,7 @@ import { Input, Physics, Scene } from 'phaser';
 
 import { Npc } from '../entities/Npc';
 import { Player } from '../entities/Player';
-import { DialogueBox } from '../ui/DialogueBox';
+import { DialogueBox, DialogueRequest } from '../ui/DialogueBox';
 import { INTERACT_RANGE, NpcDef } from './npc-config';
 
 // Cola entre os NPCs, o diálogo e o resto do jogo. Existe para a cena não
@@ -60,6 +60,24 @@ export class NpcManager {
         if (this.nearest && Input.Keyboard.JustDown(this.interactKey)) {
             this.openDialogue(this.nearest);
         }
+    }
+
+    // Diálogo sem NPC (fala de boss). Usa a mesma trava de modal da conversa:
+    // enquanto estiver aberto, a cena para de rodar o mundo.
+    openScripted(request: DialogueRequest, onClose: () => void): void {
+        if (this.isModalOpen) {
+            onClose();
+            return;
+        }
+
+        this.nearest?.setPromptVisible(false);
+        this.nearest = null;
+
+        this.setModal(true);
+        this.dialogue.open(request, () => {
+            this.setModal(false);
+            onClose();
+        });
     }
 
     destroy(): void {

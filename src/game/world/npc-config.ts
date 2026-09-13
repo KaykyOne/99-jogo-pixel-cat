@@ -51,7 +51,7 @@ export const VILLAGE_NPCS: NpcDef[] = [
         lines: [
             'Piu! Vi você chegando lá do galho, viu?',
             'A/D anda de um lado pro outro. Parece pouco, mas é o que mais se usa.',
-            'Parede alta demais? Segura o direcional CONTRA ela e sobe com W e S. Só tem uma dessas no mundo inteiro, então guarda essa.'
+            'Parede alta demais? Encosta nela e sobe com W ou a seta pra cima; S desce. Só tem uma dessas no mundo inteiro, então guarda essa.'
         ]
     },
     {
@@ -63,8 +63,8 @@ export const VILLAGE_NPCS: NpcDef[] = [
         height: 58,
         lines: [
             'Croac. Fico aqui olhando a estrada. Alguém tem que olhar.',
-            'W pula. Segurando W o pulo sai cheio; soltando no meio, sai curtinho — serve pros dois tipos de vão.',
-            'Espaço é o arranco. Atravessa vão que o pulo sozinho não vence, e passa por dentro de bicho sem levar dano.'
+            'Espaço pula. Segurando o pulo sai cheio; soltando no meio, sai curtinho — serve pros dois tipos de vão.',
+            'K é o arranco. Atravessa vão que o pulo sozinho não vence, e passa por dentro de bicho sem levar dano.'
         ]
     },
     {
@@ -104,9 +104,9 @@ export const VILLAGE_NPCS: NpcDef[] = [
         height: 92,
         lines: [
             'Essa lâmina aí na sua mão? Fui eu que temperei. Cuida dela.',
-            'F golpeia. Não fica batendo no ar: o golpe tem peso, e o bicho do outro lado tem paciência.',
-            'Segura Q e você defende. Aparar no instante certo devolve o susto pra quem veio te dar.',
-            'E as teclas 1 a 6 usam o que estiver na mochila. Poção guardada não cura ninguém.'
+            'Clica esquerdo pra golpear. Não fica batendo no ar: o golpe tem peso, e o bicho do outro lado tem paciência.',
+            'Clica direito e você defende. Aparar no instante certo devolve o susto pra quem veio te dar.',
+            'Teclas 1/2/3 trocam de arma. Na mochila, a roda do mouse escolhe e F usa. No aperto, R bebe a cura na hora. Poção guardada não cura ninguém.'
         ]
     }
 ];

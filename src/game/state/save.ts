@@ -1,5 +1,6 @@
 import { Scene } from 'phaser';
 
+import { COINS_REGISTRY_KEY, CoinSystem } from '../items/CoinSystem';
 import { Inventory, INVENTORY_REGISTRY_KEY, Slot } from '../items/Inventory';
 
 export type Difficulty = 'normal' | 'hard';
@@ -8,14 +9,14 @@ export type SaveData = {
     phaseIndex: number;
     difficulty: Difficulty;
     clearedPhases: number[];
-    // Os 6 slots do inventário. As MOEDAS moram aqui dentro, como qualquer
-    // outro item (ver Decisão de design #5 do plano): um contador separado
-    // duplicaria o estado e deixaria as duas fontes divergirem no primeiro bug.
+    // Os 6 slots do inventário (não inclui moedas, que são separadas).
     //
     // Opcional de propósito: quem grava um save novo do menu ("Novo Jogo") não
     // precisa conhecer o inventário, e é justamente a AUSÊNCIA deste campo que
     // sinaliza "run nova" para items/run-inventory.ts.
     inventory?: Slot[];
+    // Moedas do jogador (contador separado, não ocupa espaço no inventário).
+    coins?: number;
 };
 
 // v2: a vila entrou como PHASES[0] e deslocou TODOS os índices de fase — um
@@ -52,7 +53,9 @@ export function loadSave(): SaveData | null {
             // tudo". Só quem tem o campo passa pela validação de Inventory.
             inventory: Array.isArray(parsed.inventory)
                 ? Inventory.deserialize(parsed.inventory).serialize()
-                : undefined
+                : undefined,
+            // Moedas do save anterior (optional, padrão 0).
+            coins: typeof parsed.coins === 'number' ? parsed.coins : undefined
         };
     } catch {
         // localStorage pode não estar disponível (por exemplo, em navegação
@@ -78,12 +81,14 @@ export function writeSave(data: SaveData): void {
 export function saveProgress(scene: Scene, patch: Partial<SaveData>): void {
     const current = loadSave();
     const inventory = scene.registry.get(INVENTORY_REGISTRY_KEY) as Inventory | undefined;
+    const coins = scene.registry.get(COINS_REGISTRY_KEY) as CoinSystem | undefined;
 
     writeSave({
         phaseIndex: current?.phaseIndex ?? 0,
         difficulty: (scene.registry.get('difficulty') as Difficulty) ?? current?.difficulty ?? 'normal',
         clearedPhases: current?.clearedPhases ?? [],
         inventory: inventory ? inventory.serialize() : current?.inventory,
+        coins: coins ? coins.serialize() : current?.coins,
         ...patch
     });
 }

@@ -59,8 +59,7 @@ export class PlayerWeapons {
         return SPELLS[this.selectedSpellId];
     }
 
-    // O cajado é a única arma em que a seleção de magia faz sentido; o HUD e as
-    // teclas 1/2/3 usam isto para decidir se sequer aparecem/respondem.
+    // O cajado é a única arma em que a seleção de magia faz sentido; o HUD usa isto para decidir se exibe.
     get isStaffEquipped(): boolean {
         return this.equippedId === 'staff';
     }

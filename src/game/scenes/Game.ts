@@ -6,7 +6,7 @@ import { MeleeHitbox } from '../combat/MeleeHitbox';
 import { ProjectileManager } from '../combat/Projectile';
 import { ProjectileTarget } from '../combat/types';
 import { createBoss } from '../entities/bosses/boss-factory';
-import { BossBase } from '../entities/bosses/BossBase';
+import { BossBase, BossIntroRequest } from '../entities/bosses/BossBase';
 import { ForestBoss } from '../entities/bosses/ForestBoss';
 // === [/A] ===
 import { DamageSource } from '../damage/damage';
@@ -142,6 +142,9 @@ export class PhaseScene extends Scene {
 
     // Textura espelhada do lago, criada apenas na floresta.
     private lakeReflection?: GameObjects.RenderTexture;
+    private lakeReflectionExcluded = new Set<GameObjects.GameObject>();
+    private lakeReflectionExcludedFor?: GameObjects.RenderTexture;
+    private readonly lakeReflectionDrawList: GameObjects.GameObject[] = [];
     private wantsLakeReflection = false;
     // Objetos de HUD que o espelho não pode capturar (senão o painel de vida
     // apareceria refletido dentro da água).
@@ -332,6 +335,9 @@ export class PhaseScene extends Scene {
 
         this.pauseKey = this.input.keyboard!.addKey(Input.Keyboard.KeyCodes.ESC);
 
+        // Fala de abertura dos bosses (ver BossBase.updateIntro).
+        this.events.on('boss:intro', this.handleBossIntro, this);
+
         const camera = this.cameras.main;
         camera.setBounds(0, 0, this.phaseWidth, HEIGHT);
         camera.startFollow(this.player, true, 0.1, 0.1);
@@ -354,6 +360,7 @@ export class PhaseScene extends Scene {
             // === [A: combate] ===
             this.combatHud.destroy();
             this.events.off('combat:impact', this.applyImpactFeel, this);
+            this.events.off('boss:intro', this.handleBossIntro, this);
             // === [/A] ===
             this.projectiles.destroyAll();
             this.scale.off('resize', this.repositionResponsiveUI, this);
@@ -543,7 +550,6 @@ export class PhaseScene extends Scene {
         // queda usada pelos spawns do chão.
         const spawns: Record<string, EnemySpawn[]> = {
             forest: [
-                { type: 'spider', x: 500, minX: 300, maxX: 700, count: 2 },
                 // Sobre o degrau de 1 STEP (x 760..980, topo 284).
                 { type: 'hedgehog', x: 870, y: GROUND_Y - TERRAIN.STEP - 80, minX: 800, maxX: 940 },
                 // Bando no trecho aberto antes do vão longo.
@@ -560,7 +566,6 @@ export class PhaseScene extends Scene {
                 { type: 'llama', x: 3900, minX: 3800, maxX: 4080 }
             ],
             desert: [
-                { type: 'hedgehog', x: 450, minX: 250, maxX: 650 },
                 // A lhama define o deserto: obriga a aprender a fechar
                 // distância contra quem atira e recua.
                 { type: 'llama', x: 1400, minX: 1280, maxX: 1820 },
@@ -689,7 +694,9 @@ export class PhaseScene extends Scene {
         }
 
         boss.setDepth(15);
-        boss.setPatrolRange(bossX - 260, bossX + 260);
+        // Arena maior (ver BOSS_ARENA_WIDTH): patrulha mais larga, sem passar
+        // da borda da fase.
+        boss.setPatrolRange(bossX - 320, Math.min(this.phaseWidth - 80, bossX + 320));
         this.enemies.push(boss);
         // Só os bosses dedicados têm barra presa à tela; a do boss genérico
         // flutua sobre a cabeça, é objeto de mundo, e refletir na água é o
@@ -701,6 +708,28 @@ export class PhaseScene extends Scene {
         if (boss instanceof ForestBoss) {
             this.forestBoss = boss;
         }
+    }
+
+    // Fala de abertura do boss. O NpcManager já trava a cena inteira enquanto
+    // o diálogo está aberto (update sai cedo), mas a física anda sozinha: sem
+    // pausá-la, projéteis e corpos seguiriam se movendo atrás da caixa de texto.
+    private handleBossIntro(request: BossIntroRequest) {
+        const camera = this.cameras.main;
+        this.physics.world.pause();
+
+        // Enquadra jogador e boss juntos, com um tremor de "rugido".
+        camera.stopFollow();
+        camera.pan((this.player.x + request.bossX) / 2, camera.midPoint.y, 500, 'Sine.easeInOut');
+        camera.shake(280, 0.006);
+
+        this.npcs.openScripted({ speaker: request.speaker, lines: request.lines }, () => {
+            this.physics.world.resume();
+            // Pan interrompido não pode brigar com o follow; o lerp do follow
+            // desliza a câmera de volta até o jogador.
+            camera.panEffect.reset();
+            camera.startFollow(this.player, true, 0.1, 0.1);
+            request.onDone();
+        });
     }
 
     // Colliders e dano por contato de um inimigo. Extraído do create porque os
@@ -1001,7 +1030,7 @@ export class PhaseScene extends Scene {
 
         // === [B: mundo/vila] === (só o trecho "·  E interagir" no fim da linha)
         const controlsHint =
-            'A/D mover  ·  W pular  ·  F atacar  ·  Q segurar p/ defender  ·  Espaço dash  ·  Shift na parede: escalar  ·  E interagir';
+            'A/D mover  ·  Espaço pular  ·  Clique esq. atacar  ·  Clique dir. defender  ·  K dash  ·  W/↑ na parede: escalar  ·  E interagir';
         // === [/B] ===
 
         this.controlsText = this.add
@@ -1290,15 +1319,26 @@ export class PhaseScene extends Scene {
         const waterHeight = HEIGHT - FOREST_WATER_TOP_Y;
         rt.camera.setScroll(camera.scrollX, FOREST_WATER_TOP_Y - waterHeight);
 
-        const excluded = new Set<GameObjects.GameObject>([
-            rt,
-            this.dashIndicator,
-            ...this.hudObjects,
-            this.mapOverlay,
-            this.pausePanel
-        ]);
-        const toDraw = this.children.list.filter(object => !excluded.has(object));
-        rt.draw(toDraw);
+        // Roda todo frame: o conjunto de exclusão só é remontado quando o RT
+        // muda (resize), em vez de alocar Set + spread a cada frame.
+        if (this.lakeReflectionExcludedFor !== rt) {
+            this.lakeReflectionExcluded = new Set<GameObjects.GameObject>([
+                rt,
+                this.dashIndicator,
+                ...this.hudObjects,
+                this.mapOverlay,
+                this.pausePanel
+            ]);
+            this.lakeReflectionExcludedFor = rt;
+        }
+        const excluded = this.lakeReflectionExcluded;
+        this.lakeReflectionDrawList.length = 0;
+        for (const object of this.children.list) {
+            if (!excluded.has(object)) {
+                this.lakeReflectionDrawList.push(object);
+            }
+        }
+        rt.draw(this.lakeReflectionDrawList);
         // No Phaser 4, draw apenas grava comandos. render os aplica ao
         // framebuffer; sem isso a RenderTexture fica transparente.
         rt.render();

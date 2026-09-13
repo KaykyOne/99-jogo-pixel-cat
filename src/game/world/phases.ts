@@ -7,14 +7,40 @@ export const HEIGHT = 768;
 // reflexo. Meio a meio dava altura de sobra para um efeito decorativo e
 // apertava justamente a parte em que se joga.
 export const GROUND_Y = Math.round((HEIGHT * 2) / 3);
-// Largura da vila. As fases de combate usam o dobro (ver COMBAT_PHASE_WIDTH):
+// Largura da vila. As fases de combate usam o dobro mais a arena do boss (ver COMBAT_PHASE_WIDTH):
 // a vila é um hub de conversa, e esticar um hub só aumenta a caminhada entre
 // dois NPCs.
 export const PHASE_WIDTH = 2560;
 
-// Fases de combate. O dobro da vila: cabe o dobro de plataforma e de encontro
-// antes da arena do boss, sem mexer em nenhuma constante de física.
-export const COMBAT_PHASE_WIDTH = PHASE_WIDTH * 2;
+// Arena do boss: faixa extra no fim de toda fase de combate. Antes a briga
+// acontecia em ~800px de chão, menos que uma tela — sem espaço para ler um
+// padrão e sair da frente dele.
+export const BOSS_ARENA_WIDTH = 1680;
+// Onde a arena começa: logo depois do último obstáculo do percurso, que em
+// todas as fases termina por volta de 4350.
+export const BOSS_ARENA_START = PHASE_WIDTH * 2 - 640;
+
+// Fases de combate. O dobro da vila (cabe o dobro de plataforma e de encontro)
+// mais a arena do boss, sem mexer em nenhuma constante de física.
+export const COMBAT_PHASE_WIDTH = PHASE_WIDTH * 2 + BOSS_ARENA_WIDTH;
+
+// Montes da arena, os mesmos em toda fase (o terreno de cada uma pinta).
+// Servem para subir e se proteger: o de 2 STEPs fica acima da onda de impacto
+// e fora da investida, os de 1 STEP são degraus de fuga, e a one-way liga o
+// monte alto ao último. O terço final fica aberto: é onde o boss nasce e
+// onde fica o portal.
+//
+// Percurso: chão -> monte 1 (1 STEP) -> monte 2 (2 STEPs, GAP_LONG subindo)
+// -> one-way (2 STEPs, GAP_SHORT) -> monte 3 (1 STEP, GAP_LONG descendo).
+function bossArenaPlatforms(): PlatformDef[] {
+    const start = BOSS_ARENA_START;
+    return [
+        { x: start + 220, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP },
+        { x: start + 660, y: GROUND_Y - TERRAIN.STEP * 2, width: 220, height: TERRAIN.STEP * 2 },
+        { x: start + 1000, y: GROUND_Y - TERRAIN.STEP * 2, width: 180, height: TERRAIN.THICKNESS, oneWay: true },
+        { x: start + 1380, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP }
+    ];
+}
 
 // Vocabulário único de level design. Toda plataforma de toda fase usa estes
 // números — é o que faz o mundo ficar legível como um Mario, em vez de cada
@@ -618,15 +644,17 @@ export const PHASES: PhaseDefinition[] = [
 
             // ÚNICA parede escalável do jogo. Topo 3 STEPs acima do chão e 2
             // acima da one-way vizinha — os dois fora do alcance do pulo
-            // (137px), então só se passa escalando. Termina em 4350; o boss
-            // nasce em 4700 e patrulha a partir de 4440.
+            // (137px), então só se passa escalando. Termina em 4350; logo
+            // depois começa a arena do boss (BOSS_ARENA_START).
             {
                 x: 4280,
                 y: GROUND_Y - TERRAIN.STEP * 3,
                 width: 70,
                 height: TERRAIN.STEP * 3,
                 climbable: true
-            }
+            },
+
+            ...bossArenaPlatforms()
         ]
     },
     // 2 - Deserto
@@ -708,7 +736,9 @@ export const PHASES: PhaseDefinition[] = [
             { x: 3020, y: GROUND_Y - TERRAIN.STEP * 2, width: 180, height: TERRAIN.THICKNESS, oneWay: true },
             { x: 3320, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP },
             { x: 3760, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.STEP * 2 },
-            { x: 4080, y: GROUND_Y - TERRAIN.STEP, width: 220, height: TERRAIN.STEP }
+            { x: 4080, y: GROUND_Y - TERRAIN.STEP, width: 220, height: TERRAIN.STEP },
+
+            ...bossArenaPlatforms()
         ]
     },
     // 3 - Neve
@@ -783,7 +813,9 @@ export const PHASES: PhaseDefinition[] = [
             { x: 2920, y: GROUND_Y - TERRAIN.STEP, width: 180, height: TERRAIN.THICKNESS, oneWay: true },
             { x: 3220, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.STEP * 2 },
             { x: 3620, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP },
-            { x: 3980, y: GROUND_Y - TERRAIN.STEP * 2, width: 180, height: TERRAIN.THICKNESS, oneWay: true }
+            { x: 3980, y: GROUND_Y - TERRAIN.STEP * 2, width: 180, height: TERRAIN.THICKNESS, oneWay: true },
+
+            ...bossArenaPlatforms()
         ]
     },
     // 4 - Caverna
@@ -860,7 +892,9 @@ export const PHASES: PhaseDefinition[] = [
             { x: 2840, y: GROUND_Y - TERRAIN.STEP * 2, width: 160, height: TERRAIN.THICKNESS, oneWay: true },
             { x: 3200, y: GROUND_Y - TERRAIN.STEP, width: 220, height: TERRAIN.STEP },
             { x: 3620, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.STEP * 2 },
-            { x: 3940, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP }
+            { x: 3940, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP },
+
+            ...bossArenaPlatforms()
         ]
     },
     // 5 - Vulcão (por do sol)
@@ -940,7 +974,9 @@ export const PHASES: PhaseDefinition[] = [
             { x: 2980, y: GROUND_Y - TERRAIN.STEP, width: 180, height: TERRAIN.THICKNESS, oneWay: true },
             { x: 3280, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.STEP * 2 },
             { x: 3680, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP },
-            { x: 4040, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.STEP * 2 }
+            { x: 4040, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.STEP * 2 },
+
+            ...bossArenaPlatforms()
         ]
     },
     // 6 - Ruínas
@@ -1024,7 +1060,9 @@ export const PHASES: PhaseDefinition[] = [
             { x: 2940, y: GROUND_Y - TERRAIN.STEP * 2, width: 180, height: TERRAIN.THICKNESS, oneWay: true },
             { x: 3320, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP },
             { x: 3680, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.STEP * 2 },
-            { x: 4080, y: GROUND_Y - TERRAIN.STEP, width: 220, height: TERRAIN.STEP }
+            { x: 4080, y: GROUND_Y - TERRAIN.STEP, width: 220, height: TERRAIN.STEP },
+
+            ...bossArenaPlatforms()
         ]
     }
 ];

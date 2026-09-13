@@ -1,5 +1,6 @@
 import { GameObjects, Scene } from 'phaser';
 
+import { BOSS_INTROS_SEEN_KEY } from '../entities/bosses/boss-config';
 import { Difficulty, loadSave, writeSave } from '../state/save';
 import { PHASES } from '../world/phases';
 
@@ -149,6 +150,8 @@ export class MenuScene extends Scene {
 
     private startNewRun(difficulty: Difficulty) {
         this.registry.set('difficulty', difficulty);
+        // Run nova: as falas de abertura dos bosses voltam a aparecer.
+        this.registry.remove(BOSS_INTROS_SEEN_KEY);
         writeSave({ phaseIndex: 0, difficulty, clearedPhases: [] });
         this.scene.start(PHASES[0].key, { spawnX: 200 });
     }

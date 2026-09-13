@@ -5,75 +5,108 @@ import { isShopId } from '../shop/shop-config';
 import { ShopPanel } from '../shop/ShopPanel';
 import { loadSave, saveProgress } from '../state/save';
 import { InventoryHud } from '../ui/InventoryHud';
-import { Inventory } from './Inventory';
-import { ItemId, ITEMS } from './item-catalog';
+import { CoinSystem } from './CoinSystem';
+import { Inventory, INVENTORY_SLOTS } from './Inventory';
+import { isItemId, itemDef } from './item-catalog';
+import { syncRunCoins } from './run-coins';
 import { syncRunInventory } from './run-inventory';
 
 // Fachada de itens/economia para a cena. Game.ts já tem ~1000 linhas: ela
 // instancia esta classe e chama dois métodos — todo o resto (inventário, HUD,
 // drops, loja, persistência) mora aqui e nos módulos abaixo.
 //
+// Controles do inventário (barra de 6 slots no rodapé). Um slot fica
+// ESCOLHIDO (destacado) e as ações valem sobre ele:
+//   Roda do mouse / Tab   escolhe o slot (Shift+Tab volta)
+//   F                     usa o item escolhido (cura consome 1, arma equipa)
+//   G                     larga 1 unidade no chão (Shift+G larga o slot todo)
+//   R                     cura rápida: usa a primeira cura da mochila, sem
+//                         precisar escolher — é a tecla do aperto no combate
+//
 // Contrato de eventos (scene.events):
-//   escuta  'enemy:died'   -> drops (dentro do LootManager)
-//   escuta  'shop:open'    -> abre o painel da loja
-//   escuta  'ui:modal'     -> diálogo aberto bloqueia as teclas 1..6
-//   emite   'player:heal'  -> poção usada (o Agente A cura)
-//   emite   'weapon:equip' -> arma usada (o Agente A troca a arma)
-//   emite   'shop:closed' / 'ui:modal'
+//   escuta  'enemy:died'     -> drops (dentro do LootManager)
+//   escuta  'shop:open'      -> abre o painel da loja
+//   escuta  'ui:modal'       -> diálogo aberto bloqueia as teclas do inventário
+//   escuta  'weapon:changed' -> destaca no HUD a arma equipada
+//   emite   'player:heal'    -> cura usada (o Player cura)
+//   emite   'weapon:equip'   -> arma usada (o PlayerWeapons troca a arma)
+//   emite   'drop:item'      -> item largado (o LootManager cria o pickup)
 
 // De quanto em quanto tempo, no máximo, o inventário é gravado no save. Sem o
 // intervalo, uma chuva de 30 moedas escreveria no localStorage 30 vezes no
 // mesmo segundo.
 const SAVE_FLUSH_MS = 800;
 
+// Trackpad dispara dezenas de eventos de roda por gesto: sem o intervalo, um
+// deslize pularia a barra inteira.
+const WHEEL_STEP_MS = 90;
+
+type InventoryKeys = {
+    next: Input.Keyboard.Key;
+    use: Input.Keyboard.Key;
+    drop: Input.Keyboard.Key;
+    quickHeal: Input.Keyboard.Key;
+    shift: Input.Keyboard.Key;
+};
+
 export class EconomySystem {
     readonly inventory: Inventory;
+    readonly coins: CoinSystem;
 
     private readonly hud: InventoryHud;
     private readonly loot: LootManager;
     private readonly shop: ShopPanel;
-    private readonly slotKeys: Input.Keyboard.Key[] = [];
+    private readonly keys: InventoryKeys;
 
-    // Diálogo (Agente B) aberto: as teclas do inventário param de responder.
+    private selectedIndex = 0;
+    private nextWheelAt = 0;
+
+    // Diálogo aberto: as teclas do inventário param de responder.
     private externalModalOpen = false;
 
     private saveDirty = false;
     private nextSaveAt = 0;
     private unsubscribeInventory?: () => void;
+    private unsubscribeCoins?: () => void;
 
     // `target` é só uma posição (x, y): tipo estrutural de propósito, para o
     // sistema de itens não importar a classe Player nem mexer no estado dela —
     // a comunicação com combate e mundo acontece toda por evento.
     constructor(private readonly scene: Scene, private readonly target: TargetPosition) {
         this.inventory = syncRunInventory(scene);
+        this.coins = syncRunCoins(scene, this.inventory);
 
-        this.hud = new InventoryHud(scene, this.inventory);
-        this.loot = new LootManager(scene, target, this.inventory);
+        this.hud = new InventoryHud(scene, this.inventory, this.coins);
+        this.loot = new LootManager(scene, target, this.inventory, this.coins);
         this.loot.onWarning = message => this.hud.showMessage(message);
-        this.shop = new ShopPanel(scene, this.inventory);
+        this.shop = new ShopPanel(scene, this.inventory, this.coins);
+
+        // O PlayerWeapons nasce com a espada; trocas depois chegam por evento.
+        this.hud.setEquippedWeapon('sword');
 
         const keyboard = scene.input.keyboard!;
-        const codes = [
-            Input.Keyboard.KeyCodes.ONE,
-            Input.Keyboard.KeyCodes.TWO,
-            Input.Keyboard.KeyCodes.THREE,
-            Input.Keyboard.KeyCodes.FOUR,
-            Input.Keyboard.KeyCodes.FIVE,
-            Input.Keyboard.KeyCodes.SIX
-        ];
-        for (const code of codes) {
-            this.slotKeys.push(keyboard.addKey(code));
-        }
+        this.keys = {
+            next: keyboard.addKey(Input.Keyboard.KeyCodes.TAB),
+            use: keyboard.addKey(Input.Keyboard.KeyCodes.F),
+            drop: keyboard.addKey(Input.Keyboard.KeyCodes.G),
+            quickHeal: keyboard.addKey(Input.Keyboard.KeyCodes.R),
+            shift: keyboard.addKey(Input.Keyboard.KeyCodes.SHIFT)
+        };
 
-        // O Inventory vive no registry e sobrevive à cena; sem guardar o
+        // O Inventory e CoinSystem vivem no registry e sobrevivem à cena; sem guardar o
         // cancelamento, cada troca de fase deixaria mais um listener grudado
-        // nele apontando para uma cena morta.
+        // neles apontando para uma cena morta.
         this.unsubscribeInventory = this.inventory.onChange(() => {
             this.saveDirty = true;
         });
+        this.unsubscribeCoins = this.coins.onChange(() => {
+            this.saveDirty = true;
+        });
 
+        scene.input.on('wheel', this.handleWheel, this);
         scene.events.on('shop:open', this.handleShopOpen, this);
         scene.events.on('ui:modal', this.handleModal, this);
+        scene.events.on('weapon:changed', this.handleWeaponChanged, this);
         scene.events.once('shutdown', () => this.shutdown());
     }
 
@@ -96,8 +129,54 @@ export class EconomySystem {
     update(): void {
         this.loot.update();
         this.hud.update();
-        this.handleSlotKeys();
+        this.handleInventoryKeys();
         this.flushSave();
+    }
+
+    private get inputBlocked(): boolean {
+        return this.externalModalOpen || this.shop.isOpen;
+    }
+
+    private handleInventoryKeys(): void {
+        // Lê TODAS antes do gate: JustDown só zera quando é consultado, então
+        // um F apertado com o diálogo aberto dispararia sozinho ao fechar.
+        const next = Input.Keyboard.JustDown(this.keys.next);
+        const use = Input.Keyboard.JustDown(this.keys.use);
+        const drop = Input.Keyboard.JustDown(this.keys.drop);
+        const quickHeal = Input.Keyboard.JustDown(this.keys.quickHeal);
+
+        if (this.inputBlocked) {
+            return;
+        }
+
+        const shift = this.keys.shift.isDown;
+        if (next) {
+            this.selectSlot(this.selectedIndex + (shift ? -1 : 1));
+        }
+        if (use) {
+            this.useSlot(this.selectedIndex);
+        }
+        if (drop) {
+            this.dropSlot(this.selectedIndex, shift);
+        }
+        if (quickHeal) {
+            this.useQuickHeal();
+        }
+    }
+
+    private handleWheel(_pointer: unknown, _over: unknown, _dx: number, dy: number): void {
+        const now = this.scene.time.now;
+        if (this.inputBlocked || dy === 0 || now < this.nextWheelAt) {
+            return;
+        }
+
+        this.nextWheelAt = now + WHEEL_STEP_MS;
+        this.selectSlot(this.selectedIndex + Math.sign(dy));
+    }
+
+    private selectSlot(index: number): void {
+        this.selectedIndex = (index + INVENTORY_SLOTS) % INVENTORY_SLOTS;
+        this.hud.setSelectedSlot(this.selectedIndex);
     }
 
     private handleShopOpen(payload: unknown): void {
@@ -113,61 +192,94 @@ export class EconomySystem {
         this.externalModalOpen = !!(payload as { open?: unknown } | undefined)?.open;
     }
 
-    private handleSlotKeys(): void {
-        if (this.externalModalOpen || this.shop.isOpen) {
+    private handleWeaponChanged(payload: unknown): void {
+        const weaponId = (payload as { weaponId?: unknown } | undefined)?.weaponId;
+        // Os ids de arma do combate e do catálogo de itens são os mesmos.
+        if (isItemId(weaponId)) {
+            this.hud.setEquippedWeapon(weaponId);
+        }
+    }
+
+    private useQuickHeal(): void {
+        const index = this.inventory.slots.findIndex(slot => {
+            if (!slot) {
+                return false;
+            }
+            const def = itemDef(slot.id);
+            return def.kind === 'consumable' && !!def.healAmount;
+        });
+
+        if (index < 0) {
+            this.hud.showMessage('Sem cura na mochila');
             return;
         }
 
-        for (let index = 0; index < this.slotKeys.length; index++) {
-            if (Input.Keyboard.JustDown(this.slotKeys[index])) {
-                this.useSlot(index);
-            }
-        }
+        this.useSlot(index);
     }
 
     private useSlot(index: number): void {
         const slot = this.inventory.slotAt(index);
-        // Slot vazio é NO-OP silencioso, e isso é deliberado: as teclas 1/2/3
-        // também são candidatas às magias do cajado (Agente A), então um aviso
-        // aqui apareceria toda vez que o jogador lançasse uma magia.
         if (!slot) {
+            this.hud.showMessage('Slot vazio');
             return;
         }
 
-        const def = ITEMS[slot.id];
+        const def = itemDef(slot.id);
         if (!def.usable) {
-            this.hud.showMessage(`${def.name} não se usa — é para vender/gastar`);
+            this.hud.showMessage(`${def.name} não se usa — serve para a loja`);
             return;
         }
 
         if (def.kind === 'weapon' && def.weaponId) {
-            // Equipar NÃO consome o item: a arma continua no slot.
+            // Equipar NÃO consome o item: a arma continua no slot. O destaque
+            // no HUD vem pelo 'weapon:changed' que o PlayerWeapons emite.
             this.scene.events.emit('weapon:equip', { weaponId: def.weaponId });
-            this.hud.setEquippedWeapon(slot.id as ItemId);
             this.hud.showMessage(`${def.name} equipada`, '#b8cc84');
             return;
         }
 
         if (def.kind === 'consumable' && def.healAmount) {
-            // Vida cheia não gasta a poção. Antes ela sumia do inventário sem
-            // curar nada — o jogador aperta a tecla, o item some, e a leitura
-            // óbvia é "a poção não funciona".
+            // Vida cheia não gasta a cura. Antes ela sumia do inventário sem
+            // curar nada — a leitura óbvia era "a poção não funciona".
             const { currentHp, maxHp } = this.target;
             if (currentHp !== undefined && maxHp !== undefined && currentHp >= maxHp) {
                 this.hud.showMessage('Vida cheia');
                 return;
             }
 
-            // Remove ANTES de emitir: se o Agente A ainda não escuta o evento,
-            // o item some do inventário e o efeito não acontece — o contrário
-            // (curar e não gastar) seria cura infinita.
+            // Remove ANTES de emitir: o contrário (curar e não gastar) viraria
+            // cura infinita se a remoção falhasse.
             if (!this.inventory.remove(slot.id, 1)) {
                 return;
             }
 
             this.scene.events.emit('player:heal', { amount: def.healAmount });
-            this.hud.showMessage(`${def.name} usada (+${def.healAmount})`, '#b8cc84');
+            this.hud.showMessage(`${def.name} usada (+${def.healAmount} vida)`, '#b8cc84');
         }
+    }
+
+    private dropSlot(index: number, wholeStack: boolean): void {
+        const slot = this.inventory.slotAt(index);
+        if (!slot) {
+            this.hud.showMessage('Slot vazio');
+            return;
+        }
+
+        const quantity = wholeStack ? slot.quantity : 1;
+        const { id } = slot;
+        if (!this.inventory.remove(id, quantity)) {
+            return;
+        }
+
+        this.scene.events.emit('drop:item', {
+            itemId: id,
+            x: this.target.x,
+            y: this.target.y,
+            quantity
+        });
+
+        const label = quantity > 1 ? `${quantity}x ${itemDef(id).name}` : itemDef(id).name;
+        this.hud.showMessage(`${label} no chão`, '#f5c542');
     }
 
     private flushSave(): void {
@@ -181,10 +293,14 @@ export class EconomySystem {
     }
 
     private shutdown(): void {
+        this.scene.input.off('wheel', this.handleWheel, this);
         this.scene.events.off('shop:open', this.handleShopOpen, this);
         this.scene.events.off('ui:modal', this.handleModal, this);
+        this.scene.events.off('weapon:changed', this.handleWeaponChanged, this);
         this.unsubscribeInventory?.();
         this.unsubscribeInventory = undefined;
+        this.unsubscribeCoins?.();
+        this.unsubscribeCoins = undefined;
 
         // Última gravação: trocar de fase ou morrer não pode perder o que foi
         // coletado nos últimos milissegundos antes do corte.

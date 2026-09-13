@@ -43,23 +43,29 @@ export const PLAYER_DASH = {
 } as const;
 
 // Escalada agarrada (ver PlayerClimb). A descida é mais rápida que a subida
-// para o retorno não ser arrastado. O mantle precisa erguer o corpo inteiro
-// (34 * 3 = 102 px) acima da borda: 600 px/s com gravidade 1400 sobem ~128 px.
+// para o retorno não ser arrastado.
 export const PLAYER_CLIMB = {
-    upSpeed: 190,
-    downSpeed: 260,
-    mantleVelocityY: -600,
-    // Empurrão lateral que joga o jogador PARA CIMA DA BORDA no fim da
-    // escalada. 120 não dava: com moveX zerado, airDeceleration (600 px/s²)
-    // apagava o impulso em ~0,2s, o que rende uns 12px — menos que a metade
-    // da parede. Ele subia até o topo, não cruzava a borda e caía de volta.
-    // 340 sobrevive ~0,55s e cobre os ~80px necessários.
-    mantlePushX: 340,
-    // Por quanto tempo o empurrão lateral do mantle é SUSTENTADO. Aplicá-lo uma
-    // vez só não funciona: no frame do impulso o corpo ainda está encostado na
-    // parede, e a separação do collider zera a velocidade horizontal na hora.
-    // Quando o corpo finalmente passa da borda, já não sobrou empurrão nenhum.
-    mantleDurationMs: 380,
+    // Velocidade máxima agarrado na parede (px/s).
+    upSpeed: 150,
+    downSpeed: 220,
+    // Aceleração até essa velocidade (px/s²): arranca e para macio, em vez de
+    // sair na velocidade cheia no primeiro frame.
+    acceleration: 900,
+    // Folga (px) entre o topo do corpo e a borda em que as mãos "pegam" a
+    // borda e começa a subida por cima dela.
+    ledgeGrabOffset: 6,
+    // Subida por cima da borda em duas etapas, movida por velocidade (nada de
+    // setPosition, que era o teletransporte): 1) ergue o corpo até os pés
+    // passarem da borda, desacelerando no fim; 2) desliza para cima da
+    // plataforma.
+    mantleRiseSpeed: 170,
+    mantleRiseMinSpeed: 70,
+    // Quanto a subida desacelera perto do fim: velocidade = distância * isto.
+    mantleRiseEase: 6,
+    mantleOverSpeed: 120,
+    // Rede de segurança: se algo (um teto baixo) impedir a subida de terminar,
+    // larga a parede depois deste tempo em vez de travar o jogador.
+    mantleTimeoutMs: 1200,
     // Depois de subir na borda, quanto tempo a parede fica "surda" para um
     // novo agarre — senão a tecla ainda pressionada prende de novo na mesma
     // parede e o jogador não consegue sair de cima dela.

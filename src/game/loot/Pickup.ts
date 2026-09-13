@@ -119,11 +119,17 @@ export class Pickup extends Physics.Arcade.Sprite {
     // Chamado quando o inventário recusou (cheio): dá um pulinho para trás e
     // segura o ímã por um instante.
     rejectCollection(playerX: number): void {
-        this.magnetBlockedUntil = this.scene.time.now + PICKUP_CONFIG.rejectCooldownMs;
+        this.blockCollection(PICKUP_CONFIG.rejectCooldownMs);
 
         const body = this.body as Physics.Arcade.Body;
         body.setAllowGravity(true);
         body.setVelocity(playerX <= this.x ? 90 : -90, -140);
+    }
+
+    // Ímã e coleta desligados por `ms`. Item descartado nasce em cima do
+    // jogador: sem isto ele voltaria para o inventário no frame seguinte.
+    blockCollection(ms: number): void {
+        this.magnetBlockedUntil = this.scene.time.now + ms;
     }
 
     // Retorna true quando o jogador está perto o bastante para coletar.
@@ -142,13 +148,14 @@ export class Pickup extends Physics.Arcade.Sprite {
         this.glow.setPosition(this.x, this.y);
         this.label.setPosition(this.x, this.y - 18);
 
-        if (distance <= PICKUP_CONFIG.collectRange) {
+        const blocked = time < this.magnetBlockedUntil;
+        if (!blocked && distance <= PICKUP_CONFIG.collectRange) {
             return true;
         }
 
         const body = this.body as Physics.Arcade.Body;
 
-        if (distance > PICKUP_CONFIG.magnetRange || time < this.magnetBlockedUntil) {
+        if (blocked || distance > PICKUP_CONFIG.magnetRange) {
             // Saiu do alcance: devolve a gravidade. Sem isto, um item que foi
             // atraído e ficou para trás continuaria boiando no ar para sempre.
             if (!body.allowGravity) {

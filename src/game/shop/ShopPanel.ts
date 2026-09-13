@@ -1,6 +1,7 @@
 import { GameObjects, Input, Scene } from 'phaser';
 
 import { getDifficultyModifiersFor } from '../config/difficulty';
+import { CoinSystem } from '../items/CoinSystem';
 import { Inventory } from '../items/Inventory';
 import { drawItemBlocks } from '../items/item-art';
 import { ITEMS } from '../items/item-catalog';
@@ -43,7 +44,8 @@ export class ShopPanel {
     // os controles do jogador, e o inventário escuta para não consumir 1..6.
     constructor(
         private readonly scene: Scene,
-        private readonly inventory: Inventory
+        private readonly inventory: Inventory,
+        private readonly coins: CoinSystem
     ) {
         this.panel = scene.add.graphics();
         this.selection = scene.add.graphics();
@@ -181,7 +183,7 @@ export class ShopPanel {
             return;
         }
 
-        const result = executeTransaction(this.inventory, entry, getDifficultyModifiersFor(this.scene));
+        const result = executeTransaction(this.inventory, this.coins, entry, getDifficultyModifiersFor(this.scene));
 
         // Falha nunca é silenciosa: a recusa aparece escrita, e nada é perdido.
         this.message.setColor(result.ok ? '#b8cc84' : '#ff6b6b');
@@ -220,7 +222,7 @@ export class ShopPanel {
     }
 
     private refreshTexts(): void {
-        this.coinText.setText(`${this.inventory.count('coin')} moedas`);
+        this.coinText.setText(`${this.coins.current} moedas`);
         this.rows.forEach((row, index) => {
             const entry = this.shop?.entries[index];
             if (entry) {

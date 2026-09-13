@@ -15,28 +15,23 @@ import { Parryable, PlayerParry } from './PlayerParry';
 import { syncFacingOffset } from './physics-utils';
 
 type PlayerKeys = {
-    attack: Input.Keyboard.Key;
-    parry: Input.Keyboard.Key;
     dash: Input.Keyboard.Key;
-    // Agarrar/escalar parede. Tecla própria: o Espaço já é o dash.
-    climb: Input.Keyboard.Key;
+    jump: Input.Keyboard.Key;
     right: Input.Keyboard.Key;
     left: Input.Keyboard.Key;
+    // Cima (W ou seta) agarra e escala a parede; baixo desce nela.
     up: Input.Keyboard.Key;
+    upArrow: Input.Keyboard.Key;
     down: Input.Keyboard.Key;
+    downArrow: Input.Keyboard.Key;
 
-    // Troca direta de arma. Z/X/C e não 1/2/3 porque as teclas numéricas
-    // pertencem aos slots do inventário.
+    // Troca direta de arma em 1/2/3.
     weaponSword: Input.Keyboard.Key;
     weaponBow: Input.Keyboard.Key;
     weaponStaff: Input.Keyboard.Key;
 
-    // Seleção de magia. Ficou SO no R: 1/2/3 são slots do inventário, e
-    // guardar as duas coisas na mesma tecla fazia o 1 lançar a magia E beber a
-    // poção do slot 1 no mesmo frame — os dois sistemas escutam a tecla, e
-    // nenhum consegue "consumir" o input do outro.
-    spellCycle: Input.Keyboard.Key;
-};
+    // Seleção de magia em Q (ciclar).
+    spellCycle: Input.Keyboard.Key;};
 
 type PlayerState = 'alive' | 'hurt' | 'dead';
 
@@ -52,6 +47,13 @@ export class Player extends Physics.Arcade.Sprite {
     private keys: PlayerKeys;
 
     private controlsEnabled = true;
+
+    // Estado do mouse para combate: esquerdo = atacar, direito = defender.
+    private mouseRightDown = false;
+    // Clique esquerdo pendente, marcado no evento e consumido no update. Um
+    // flag de borda comparado frame a frame perderia cliques mais rápidos que
+    // um frame e dispararia golpe fantasma ao voltar de um update interrompido.
+    private attackClickPending = false;
 
     // Diálogo/loja aberto (evento 'ui:modal'). Bloqueia TODO input de combate:
     // sem isto, conversar com um NPC dispararia golpe e magia junto.
@@ -108,10 +110,10 @@ export class Player extends Physics.Arcade.Sprite {
         this.parry = new PlayerParry(scene, this);
 
         this.keys = scene.input.keyboard!.addKeys({
-            attack: Input.Keyboard.KeyCodes.F,
-            parry: Input.Keyboard.KeyCodes.Q,
-            dash: Input.Keyboard.KeyCodes.SPACE,
-            climb: Input.Keyboard.KeyCodes.SHIFT,
+            dash: Input.Keyboard.KeyCodes.K,
+            jump: Input.Keyboard.KeyCodes.SPACE,
+            upArrow: Input.Keyboard.KeyCodes.UP,
+            downArrow: Input.Keyboard.KeyCodes.DOWN,
 
             right: Input.Keyboard.KeyCodes.D,
             left: Input.Keyboard.KeyCodes.A,
@@ -119,12 +121,21 @@ export class Player extends Physics.Arcade.Sprite {
             up: Input.Keyboard.KeyCodes.W,
             down: Input.Keyboard.KeyCodes.S,
 
-            weaponSword: Input.Keyboard.KeyCodes.Z,
-            weaponBow: Input.Keyboard.KeyCodes.X,
-            weaponStaff: Input.Keyboard.KeyCodes.C,
+            weaponSword: Input.Keyboard.KeyCodes.ONE,
+            weaponBow: Input.Keyboard.KeyCodes.TWO,
+            weaponStaff: Input.Keyboard.KeyCodes.THREE,
 
-            spellCycle: Input.Keyboard.KeyCodes.R
+            spellCycle: Input.Keyboard.KeyCodes.Q
         }) as PlayerKeys;
+
+        // Mouse: esquerdo para atacar, direito para defender.
+        scene.input.mouse!.disableContextMenu();
+        scene.input.on('pointerdown', this.onMouseDown, this);
+        scene.input.on('pointerup', this.onMouseUp, this);
+        scene.events.once('shutdown', () => {
+            scene.input.off('pointerdown', this.onMouseDown, this);
+            scene.input.off('pointerup', this.onMouseUp, this);
+        });
 
         // Contratos com os outros sistemas. Ficam aqui, e não na cena, para o
         // Game.ts não virar o roteador de eventos de todo mundo.
@@ -153,9 +164,25 @@ export class Player extends Physics.Arcade.Sprite {
         this.modalOpen = payload?.open === true;
 
         // Fecha qualquer intenção pendente: com o diálogo abrindo no mesmo
-        // frame em que F foi apertado, o golpe sairia por trás do painel.
+        // frame em que mouse foi clicado, o golpe sairia por trás do painel.
         if (this.modalOpen) {
             this.weapons.clearBuffer();
+            this.attackClickPending = false;
+            this.mouseRightDown = false;
+        }
+    }
+
+    private onMouseDown(pointer: Input.Pointer): void {
+        if (pointer.button === 0) {
+            this.attackClickPending = true;
+        } else if (pointer.button === 2) {
+            this.mouseRightDown = true;
+        }
+    }
+
+    private onMouseUp(pointer: Input.Pointer): void {
+        if (pointer.button === 2) {
+            this.mouseRightDown = false;
         }
     }
 
@@ -198,21 +225,21 @@ export class Player extends Physics.Arcade.Sprite {
         // Lido AGORA porque climb.update() consome a marcação do collider: o
         // teste do dash, mais abaixo, precisa do valor deste frame.
         const nearClimbableWall = this.climb.isTouchingWall;
-        // SHIFT encostado na parede escala. É a forma primária: chegar, segurar
-        // e subir. Segurar o direcional CONTRA a parede continua valendo, e W/S
-        // seguem dando o controle fino de subir e descer.
-        const holdingClimbKey = this.keys.climb.isDown && nearClimbableWall;
+        // W ou seta pra cima encostado na parede escala: chegar, segurar e
+        // subir. Segurar o direcional CONTRA a parede continua valendo, e S/seta
+        // pra baixo descem.
+        const upHeld = this.keys.up.isDown || this.keys.upArrow.isDown;
+        const downHeld = this.keys.down.isDown || this.keys.downArrow.isDown;
+        const holdingClimbKey = upHeld && nearClimbableWall;
         const holdingIntoWall =
             holdingClimbKey ||
             (this.climb.touchingWallDirection === -1 && this.keys.left.isDown) ||
             (this.climb.touchingWallDirection === 1 && this.keys.right.isDown);
-        // Sem W/S, o Shift sozinho já sobe — senão o jogador ficaria pendurado
-        // sem entender que falta uma segunda tecla.
-        const manualClimb = (this.keys.up.isDown ? -1 : 0) + (this.keys.down.isDown ? 1 : 0);
+        const manualClimb = (upHeld ? -1 : 0) + (downHeld ? 1 : 0);
         const climbInput = manualClimb !== 0 ? manualClimb : holdingClimbKey ? -1 : 0;
 
         this.updateTimers(delta, onGround);
-        this.parry.update(time, this.keys.parry.isDown);
+        this.parry.update(time, this.mouseRightDown);
         this.dash.update(time);
         // O dash controla o corpo inteiro (inclusive a gravidade) enquanto dura.
         if (!this.dash.isDashing) {
@@ -223,7 +250,8 @@ export class Player extends Physics.Arcade.Sprite {
 
         // Durante o hitstun o jogador não pode atacar nem pular; apenas sofre o
         // recuo do knockback.
-        if (this.hurtTimer <= 0 && !this.isSwinging) {
+        // Subindo na borda não dá dash: o corpo está passando pela quina.
+        if (this.hurtTimer <= 0 && !this.isSwinging && !this.climb.isMantling) {
             // O dash é permitido no ar. Um ataque já iniciado não é
             // interrompido, preservando o ciclo da hitbox de combate.
             // O dash vale em qualquer lugar, inclusive colado na parede: com a
@@ -237,12 +265,10 @@ export class Player extends Physics.Arcade.Sprite {
             }
         }
 
-        // Q defende, e a defesa dura enquanto a tecla estiver pressionada (a
-        // soltura é tratada em parry.update). Lê `isDown` e não `JustDown`:
-        // sendo uma postura sustentada, apertar Q no ar e aterrissar segurando
-        // deve entrar em guarda ao tocar o chão, em vez de exigir soltar e
-        // apertar de novo. O componente ignora a chamada se já estiver em
-        // guarda ou em cooldown, então chamar todo frame é inofensivo.
+        // Mouse direito defende, e a defesa dura enquanto o botão estiver pressionado.
+        // Lê `mouseRightDown` e não um evento único: sendo uma postura sustentada,
+        // clicar no ar e aterrissar segurando deve entrar em guarda ao tocar o chão,
+        // em vez de exigir soltar e clicar de novo.
         //
         // Só do chão e fora de qualquer outra ação: no ar ou no meio de um
         // golpe a defesa viraria um cancelamento universal.
@@ -251,9 +277,9 @@ export class Player extends Physics.Arcade.Sprite {
             onGround &&
             !this.modalOpen &&
             !this.dash.isDashing &&
-            !this.climb.isGripping &&
+            !this.climb.isBusy &&
             !this.isSwinging &&
-            this.keys.parry.isDown
+            this.mouseRightDown
         ) {
             this.parry.attempt(time);
         }
@@ -262,8 +288,8 @@ export class Player extends Physics.Arcade.Sprite {
             // Defendendo: plantado, sem atacar e sem pular.
             this.jumpBufferTimer = 0;
             this.coyoteTimer = 0;
-        } else if (this.climb.isGripping) {
-            // W está sendo usado para subir, não para pular. Zerar as janelas
+        } else if (this.climb.isBusy) {
+            // Na parede ou subindo na borda não se pula. Zerar as janelas
             // evita que o pulo saia sozinho no instante em que soltar a parede.
             this.jumpBufferTimer = 0;
             this.coyoteTimer = 0;
@@ -277,7 +303,7 @@ export class Player extends Physics.Arcade.Sprite {
         } else if (this.parry.isBusy) {
             // Defesa prende o jogador no lugar, encarando a direção atual.
             this.setVelocityX(0);
-        } else if (this.climb.isGripping) {
+        } else if (this.climb.isBusy) {
             // PlayerClimb controla os dois eixos; aqui só encara a parede.
             this.setFlipX(this.climb.touchingWallDirection < 0);
         } else if (this.isSwinging && onGround) {
@@ -300,7 +326,7 @@ export class Player extends Physics.Arcade.Sprite {
             this.applyHorizontalMovement(moveX, onGround, dt);
         }
 
-        if (!this.dash.isDashing && !this.climb.isGripping) {
+        if (!this.dash.isDashing && !this.climb.isBusy) {
             this.applyVerticalMovement(dt);
         }
         this.updateAnimation(onGround);
@@ -308,6 +334,10 @@ export class Player extends Physics.Arcade.Sprite {
         // O corpo físico não acompanha flipX sozinho (ver physics-utils);
         // resincroniza todo frame com a direção atual do sprite.
         syncFacingOffset(this.arcadeBody, this.flipX, PLAYER_BODY);
+
+        // Clique que não virou golpe neste frame (hitstun, parry, parede) é
+        // descartado, e não guardado para sair atrasado depois.
+        this.attackClickPending = false;
     }
 
     setControlsEnabled(enabled: boolean) {
@@ -480,7 +510,7 @@ export class Player extends Physics.Arcade.Sprite {
             this.coyoteTimer = Math.max(0, this.coyoteTimer - delta);
         }
 
-        if (Input.Keyboard.JustDown(this.keys.up)) {
+        if (Input.Keyboard.JustDown(this.keys.jump)) {
             this.jumpBufferTimer = PLAYER_MOVEMENT.jumpBufferTime;
         } else {
             this.jumpBufferTimer = Math.max(0, this.jumpBufferTimer - delta);
@@ -511,20 +541,16 @@ export class Player extends Physics.Arcade.Sprite {
             return;
         }
 
-        // Só REGISTRA a intenção. Quem executa é o update do PlayerWeapons, a
-        // cada frame, consumindo o buffer assim que a arma libera — é o que
-        // salva o golpe apertado um instante cedo demais.
-        if (Input.Keyboard.JustDown(this.keys.attack)) {
+        // Só REGISTRA a intenção; o PlayerWeapons executa quando a arma libera.
+        if (this.attackClickPending) {
+            this.attackClickPending = false;
             this.weapons.queueAttack(time);
         }
 
         this.weapons.update(time, onGround);
     }
 
-    // Troca de arma (Z/X/C) e seleção de magia (1/2/3, ou R para ciclar).
-    // As numéricas são compartilhadas com os slots do inventário: por isso
-    // PlayerWeapons ignora a seleção quando o cajado NÃO está equipado, e R
-    // existe como caminho sem nenhuma disputa.
+    // Troca de arma (1/2/3) e ciclo de magia (Q).
     private handleWeaponSwitch() {
         if (this.modalOpen) {
             return;
@@ -587,8 +613,8 @@ export class Player extends Physics.Arcade.Sprite {
     private applyVerticalMovement(dt: number) {
         const body = this.arcadeBody;
 
-        // Soltar W durante a subida corta o impulso (altura variável).
-        if (Input.Keyboard.JustUp(this.keys.up) && body.velocity.y < 0) {
+        // Soltar Espaço durante a subida corta o impulso (altura variável).
+        if (Input.Keyboard.JustUp(this.keys.jump) && body.velocity.y < 0) {
             this.setVelocityY(body.velocity.y * PLAYER_MOVEMENT.jumpCutMultiplier);
         }
 
@@ -619,19 +645,12 @@ export class Player extends Physics.Arcade.Sprite {
             return;
         }
 
-        // Não há asset de escalada: subindo/descendo reaproveita o ciclo de
-        // caminhada (lê como braçada na parede) e, parado nela, congela o
-        // frame de salto — mesma solução pragmática já usada em hurt/morte.
-        if (this.climb.isGripping) {
-            if (this.climb.isClimbingVertically) {
-                this.play('player-walk', true);
-                if (this.anims.isPaused) {
-                    this.anims.resume();
-                }
-            } else {
-                this.play('player-jump', true);
-                this.anims.pause();
-            }
+        // Não há asset de escalada: na parede e subindo na borda o sprite fica
+        // CONGELADO numa pose de salto. Quem vende o movimento é o deslocamento
+        // suave (aceleração e subida em duas etapas), não a animação.
+        if (this.climb.isBusy) {
+            this.play('player-jump', true);
+            this.anims.pause();
             return;
         }
 

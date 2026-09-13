@@ -160,14 +160,13 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
 
     // --- Cajado -------------------------------------------------------------
     // Não tem golpe próprio: o que ele dispara é a magia selecionada (ver
-    // spells.ts). Exige os pés no chão — conjurar pulando tiraria o único custo
-    // de posicionamento que as magias têm.
+    // spells.ts).
     staff: {
         id: 'staff',
         name: 'Cajado',
         kind: 'magic',
         cooldownMs: 300,
-        allowAirborne: false,
+        allowAirborne: true,
         castAnimationKey: 'player-attack-3',
         castLockMs: 320
     }

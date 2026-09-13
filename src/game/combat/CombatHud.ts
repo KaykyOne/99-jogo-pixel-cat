@@ -83,10 +83,10 @@ export class CombatHud {
         }
         this.lastLabel = label;
 
-        this.weaponText.setText(`ARMA: ${weapons.equipped.name}   Z/X/C trocar`);
+        this.weaponText.setText(`ARMA: ${weapons.equipped.name}   1/2/3 trocar   🖱 ataca/defende`);
 
         if (spell) {
-            this.spellText.setText(`${spell.name}  ${spell.manaCost} mana  ·  R troca`);
+            this.spellText.setText(`${spell.name}  ${spell.manaCost} mana  ·  Q troca`);
             this.spellText.setColor(colorToCss(spell.color));
             this.spellText.setVisible(true);
         } else {

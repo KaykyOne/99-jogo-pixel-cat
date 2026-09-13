@@ -28,8 +28,8 @@ export type ItemDef = {
     color: number;
     accent: number;
     art: ItemBlockArt;
-    // Se responde às teclas 1..6. Moeda e maçã existem para gastar/vender, não
-    // para usar — apertar a tecla nelas não deve fazer nada.
+    // Se responde ao F (usar o item escolhido). Moeda existe para gastar, não
+    // para usar — apertar F nela só avisa.
     usable: boolean;
     // Só para consumíveis: quanto de HP restaura (vira o payload de
     // 'player:heal', que o Agente A escuta).
@@ -64,11 +64,12 @@ export const ITEMS = {
     apple: {
         id: 'apple',
         name: 'Maçã',
-        kind: 'material',
+        kind: 'consumable',
         stackSize: 10,
         color: 0xd94f4f,
         accent: 0x4f7a3d,
-        usable: false,
+        usable: true,
+        healAmount: 2,
         art: [
             '...o....',
             '..oaa...',

@@ -1,4 +1,5 @@
 import { DifficultyModifiers } from '../config/difficulty';
+import { CoinSystem } from '../items/CoinSystem';
 import { Inventory } from '../items/Inventory';
 import { ITEMS } from '../items/item-catalog';
 import { ShopEntry } from './shop-config';
@@ -23,35 +24,26 @@ export function effectivePrice(entry: ShopEntry, modifiers: DifficultyModifiers)
     return Math.max(1, Math.floor(entry.price * modifiers.shopSellValue));
 }
 
-// Toda validação acontece ANTES de qualquer mutação. Inventory.remove é
-// atômico, mas a sequência remove -> add não é: se o add falhasse depois do
-// remove, o jogador perderia o item e não receberia nada.
+// Toda validação acontece ANTES de qualquer mutação.
 export function executeTransaction(
     inventory: Inventory,
+    coins: CoinSystem,
     entry: ShopEntry,
     modifiers: DifficultyModifiers
 ): TransactionResult {
     const price = effectivePrice(entry, modifiers);
     const itemName = ITEMS[entry.item].name;
 
-    // A validação de espaço roda numa CÓPIA do inventário, não com
-    // hasSpaceFor direto: pagar esvazia slots (o stack de moeda pode zerar, o
-    // lote de maçãs pode limpar o slot inteiro), e um teste feito antes do
-    // pagamento recusaria trocas que na verdade cabem. Copiar 6 slots é
-    // barato; recusar uma venda legítima na cara do jogador, não.
-    const simulated = Inventory.deserialize(inventory.serialize());
-
     if (entry.mode === 'buy') {
-        if (inventory.count('coin') < price) {
+        if (coins.current < price) {
             return { ok: false, reason: 'no-funds', message: `Moedas insuficientes (${price})` };
         }
 
-        simulated.remove('coin', price);
-        if (simulated.add(entry.item, entry.quantity) > 0) {
+        if (!inventory.hasSpaceFor(entry.item, entry.quantity)) {
             return { ok: false, reason: 'no-space', message: 'Inventário cheio' };
         }
 
-        inventory.remove('coin', price);
+        coins.remove(price);
         inventory.add(entry.item, entry.quantity);
 
         return { ok: true, message: `${itemName} comprada por ${price}` };
@@ -65,13 +57,8 @@ export function executeTransaction(
         };
     }
 
-    simulated.remove(entry.item, entry.lot);
-    if (simulated.add('coin', price) > 0) {
-        return { ok: false, reason: 'no-space', message: 'Sem espaço para as moedas' };
-    }
-
     inventory.remove(entry.item, entry.lot);
-    inventory.add('coin', price);
+    coins.add(price);
 
     return { ok: true, message: `${entry.lot} ${itemName.toLowerCase()} por ${price} moeda(s)` };
 }
