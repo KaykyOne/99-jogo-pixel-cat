@@ -2,6 +2,7 @@ import { GameObjects, Math as PhaserMath, Scene } from 'phaser';
 
 import { BaseEnemy } from '../BaseEnemy';
 import { Player } from '../Player';
+import { drawIcon, drawWoodFrame, HUD_PANEL, UI_COLORS, UI_CSS, uiTextOutlined } from '../../ui/ui-theme';
 import { BOSS_INTROS_SEEN_KEY, BossDefinition, BossPatternDef } from './boss-config';
 
 // Etapas de um padrão. É esta separação em três tempos que diferencia um boss
@@ -56,7 +57,7 @@ export abstract class BossBase extends BaseEnemy {
     // enquanto o diálogo está aberto, 'done' libera os padrões.
     private introState: 'pending' | 'playing' | 'done' = 'pending';
 
-    private readonly barBg: GameObjects.Rectangle;
+    private readonly barFrame: GameObjects.Graphics;
     private readonly barFill: GameObjects.Rectangle;
     private readonly barLabel: GameObjects.Text;
     private readonly barPhaseTag: GameObjects.Text;
@@ -70,31 +71,19 @@ export abstract class BossBase extends BaseEnemy {
         // Barra fixa no topo da tela (e não flutuando sobre a cabeça): um boss
         // que atravessa a arena inteira levaria a barra para fora do campo de
         // visão bem na hora em que ela mais importa.
-        this.barBg = scene.add
-            .rectangle(0, 0, BAR_WIDTH + 6, BAR_HEIGHT + 6, 0x08111d, 0.9)
-            .setStrokeStyle(2, 0xb8cc84, 0.85)
-            .setScrollFactor(0)
-            .setDepth(30);
+        this.barFrame = scene.add.graphics().setScrollFactor(0).setDepth(30);
         this.barFill = scene.add
-            .rectangle(0, 0, BAR_WIDTH, BAR_HEIGHT, 0xd94f4f)
+            .rectangle(0, 0, BAR_WIDTH, BAR_HEIGHT, UI_COLORS.red)
             .setOrigin(0, 0.5)
             .setScrollFactor(0)
             .setDepth(31);
         this.barLabel = scene.add
-            .text(0, 0, definition.name, {
-                fontFamily: 'Georgia, serif',
-                fontSize: '15px',
-                color: '#f7e7b0'
-            })
+            .text(0, 0, definition.name, uiTextOutlined(17, UI_CSS.cream))
             .setOrigin(0.5, 1)
             .setScrollFactor(0)
             .setDepth(31);
         this.barPhaseTag = scene.add
-            .text(0, 0, '', {
-                fontFamily: 'monospace',
-                fontSize: '11px',
-                color: '#ff9a3c'
-            })
+            .text(0, 0, '', uiTextOutlined(13, '#ff9a3c'))
             .setOrigin(1, 1)
             .setScrollFactor(0)
             .setDepth(31)
@@ -115,7 +104,7 @@ export abstract class BossBase extends BaseEnemy {
     // Mesma razão do resto do HUD: sem isto a barra do boss aparece espelhada
     // dentro d'água na floresta, que é justamente onde ele mora.
     get hudObjects(): GameObjects.GameObject[] {
-        return [this.barBg, this.barFill, this.barLabel, this.barPhaseTag];
+        return [this.barFrame, this.barFill, this.barLabel, this.barPhaseTag];
     }
 
     update(time: number, delta: number): void {
@@ -215,7 +204,7 @@ export abstract class BossBase extends BaseEnemy {
     destroy(fromScene?: boolean): void {
         this.scene?.scale.off('resize', this.layoutBar, this);
         this.telegraphTween?.remove();
-        this.barBg.destroy();
+        this.barFrame.destroy();
         this.barFill.destroy();
         this.barLabel.destroy();
         this.barPhaseTag.destroy();
@@ -397,23 +386,36 @@ export abstract class BossBase extends BaseEnemy {
         // lado da fase deixava a barra ligada desde o spawn, anunciando um
         // combate que ainda está a dois mil pixels de distância.
         const visible = this.isAlive && Math.abs(this.target.x - this.x) <= ENGAGE_DISTANCE;
-        this.barBg.setVisible(visible);
+        this.barFrame.setVisible(visible);
         this.barFill.setVisible(visible);
         this.barLabel.setVisible(visible);
         this.barPhaseTag.setVisible(visible && this.bossPhase === 2);
     }
 
     private layoutBar(): void {
-        const centerX = this.scene.scale.width / 2;
+        // Centralizada, mas sem invadir a tábua do HUD do canto esquerdo em
+        // telas estreitas.
+        const frameWidth = BAR_WIDTH + 58;
+        const centerX = Math.max(
+            this.scene.scale.width / 2,
+            HUD_PANEL.x + HUD_PANEL.width + 20 + frameWidth / 2
+        );
         // Topo, e não rodapé: os seis slots do inventário ocupam a faixa de
         // baixo (altura - 82 até altura - 26) e a barra do boss caía bem em
         // cima deles. Aqui ela fica entre o painel da fase (à esquerda) e a
         // linha de controles (à direita), sem encostar em nenhum dos dois.
         const y = 72;
 
-        this.barBg.setPosition(centerX, y);
-        this.barFill.setPosition(centerX - BAR_WIDTH / 2, y);
-        this.barLabel.setPosition(centerX, y - BAR_HEIGHT);
-        this.barPhaseTag.setPosition(centerX + BAR_WIDTH / 2, y - BAR_HEIGHT);
+        // Tábua com a caveira à esquerda e o trilho escuro por baixo da vida.
+        const barLeft = centerX - BAR_WIDTH / 2;
+        const frameLeft = barLeft - 44;
+        this.barFrame.clear();
+        drawWoodFrame(this.barFrame, frameLeft, y - 18, frameWidth, 36);
+        this.barFrame.fillStyle(0x1a0f08, 1).fillRect(barLeft - 2, y - BAR_HEIGHT / 2 - 2, BAR_WIDTH + 4, BAR_HEIGHT + 4);
+        drawIcon(this.barFrame, 'skull', frameLeft + 22, y, 20);
+
+        this.barFill.setPosition(barLeft, y);
+        this.barLabel.setPosition(centerX, y - 22);
+        this.barPhaseTag.setPosition(centerX + BAR_WIDTH / 2, y - 22);
     }
 }

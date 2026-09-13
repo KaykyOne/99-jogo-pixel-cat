@@ -59,6 +59,19 @@ export class PreloadScene extends Scene {
         createPlayerAnimations(this);
         createEnemyAnimations(this);
         createPortalAnimations(this);
-        this.scene.start('Menu');
+
+        // Espera a fonte pixel da UI (public/style.css): o Phaser rasteriza o
+        // texto na criação, e um texto criado antes da fonte chegar fica com a
+        // fonte reserva para sempre. O teto de tempo evita travar o jogo numa
+        // rede lenta — nesse caso a UI sai em monospace.
+        const start = () => this.scene.start('Menu');
+        if (!document.fonts) {
+            start();
+            return;
+        }
+        Promise.race([
+            document.fonts.load('16px "Pixelify Sans"'),
+            new Promise(resolve => setTimeout(resolve, 2000))
+        ]).then(start, start);
     }
 }

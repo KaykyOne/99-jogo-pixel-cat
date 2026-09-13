@@ -2,6 +2,7 @@ import { GameObjects, Math as PhaserMath, Physics, Scene, Time, Tweens } from 'p
 
 import { ensureItemTexture } from '../items/item-art';
 import { ItemId, ITEMS } from '../items/item-catalog';
+import { uiTextOutlined } from '../ui/ui-theme';
 
 // Todo número do item caído no chão mora aqui: alcance do ímã, tempo de vida,
 // força do pop. Ajustar a sensação da coleta é mexer nesta tabela, não na
@@ -81,7 +82,7 @@ export class Pickup extends Physics.Arcade.Sprite {
             .setDepth(PICKUP_CONFIG.depth - 1);
 
         this.label = scene.add
-            .text(x, y - 18, '', { fontFamily: 'monospace', fontSize: '11px', color: '#f7e7b0' })
+            .text(x, y - 18, '', uiTextOutlined(12))
             .setOrigin(0.5, 1)
             .setDepth(PICKUP_CONFIG.depth);
         this.refreshLabel();

@@ -22,6 +22,17 @@ import { EconomySystem } from '../items/EconomySystem';
 import { syncRunInventory } from '../items/run-inventory';
 // === [/C] ===
 import { clearSave, Difficulty, loadSave, saveProgress } from '../state/save';
+import {
+    drawIcon,
+    drawParchment,
+    drawWoodFrame,
+    HUD_PANEL,
+    UI_COLORS,
+    UI_CSS,
+    uiText,
+    uiTextOutlined
+} from '../ui/ui-theme';
+import { MapPhaseState, WorldMapOverlay } from '../ui/WorldMapOverlay';
 import { isPathBlocked, setLineOfSightBlockers } from '../world/line-of-sight';
 // === [B: mundo/vila] ===
 import { NpcManager } from '../world/NpcManager';
@@ -50,8 +61,6 @@ type SceneData = {
     spawnX: number;
 };
 
-type MapPhaseState = 'locked' | 'reached' | 'cleared';
-
 type EnemySpawn = {
     type: EnemyType;
     x: number;
@@ -75,6 +84,23 @@ const PHASE_START_X = 200;
 // Duração da animação de morte do jogador (player-death: 6 frames a 10fps).
 const DEATH_ANIMATION_MS = 600;
 
+// Controles listados na pausa. O HUD não repete isto: só aponta para a pausa.
+const PAUSE_CONTROLS: readonly [label: string, keys: string][] = [
+    ['Andar', 'A / D'],
+    ['Pular', 'Espaço'],
+    ['Dash', 'K'],
+    ['Escalar', 'W ou ↑ encostado na parede'],
+    ['Atacar', 'Clique esquerdo'],
+    ['Defender', 'Clique direito (segurar)'],
+    ['Trocar arma', '1 / 2 / 3'],
+    ['Trocar magia', 'Q (com o cajado)'],
+    ['Mochila', 'Roda do mouse ou Tab escolhe'],
+    ['Usar / largar', 'F usa  ·  G larga  ·  Shift+G tudo'],
+    ['Cura rápida', 'R'],
+    ['Conversar', 'E'],
+    ['Mapa', 'M']
+];
+
 export class PhaseScene extends Scene {
     private phase: PhaseDefinition;
     private phaseIndex: number;
@@ -90,21 +116,16 @@ export class PhaseScene extends Scene {
     private mapKey!: Input.Keyboard.Key;
     private pauseKey!: Input.Keyboard.Key;
     private isPaused = false;
-    private mapOverlay!: GameObjects.Container;
-    private mapMarker!: GameObjects.Star;
-    private mapLocationText!: GameObjects.Text;
-    private hpText!: GameObjects.Text;
+    private worldMap!: WorldMapOverlay;
+    private hpHearts!: GameObjects.Graphics;
     private lastHp = -1;
-    private dashIndicator!: GameObjects.Arc;
+    private dashIndicator!: GameObjects.Rectangle;
     private controlsText!: GameObjects.Text;
-    private mapPanel!: GameObjects.Graphics;
-    private mapRoute!: GameObjects.Graphics;
-    private mapTitle!: GameObjects.Text;
-    private mapHint!: GameObjects.Text;
-    private mapPhaseNodes: { icon: GameObjects.Graphics; label: GameObjects.Text; x: number }[] = [];
     private pausePanel!: GameObjects.Container;
     private pausePanelGraphics!: GameObjects.Graphics;
     private pauseTitle!: GameObjects.Text;
+    private pauseLabels!: GameObjects.Text;
+    private pauseKeys!: GameObjects.Text;
     private pauseHint!: GameObjects.Text;
 
     // Projéteis vivos da fase (cusparada da lhama, teia da aranha, flecha e
@@ -168,7 +189,6 @@ export class PhaseScene extends Scene {
         this.teleporting = false;
         this.phaseCleared = false;
         this.lastHp = -1;
-        this.mapPhaseNodes = [];
         this.isPaused = false;
         this.lakeReflection = undefined;
         this.wantsLakeReflection = false;
@@ -359,6 +379,7 @@ export class PhaseScene extends Scene {
             // === [/B] ===
             // === [A: combate] ===
             this.combatHud.destroy();
+            this.worldMap.destroy();
             this.events.off('combat:impact', this.applyImpactFeel, this);
             this.events.off('boss:intro', this.handleBossIntro, this);
             // === [/A] ===
@@ -400,8 +421,8 @@ export class PhaseScene extends Scene {
         if (Input.Keyboard.JustDown(this.pauseKey)) {
             // ESC fecha primeiro o painel que já está aberto, em vez de
             // empilhar pausa por cima do mapa.
-            if (this.mapOverlay.visible) {
-                this.mapOverlay.setVisible(false);
+            if (this.worldMap.isOpen) {
+                this.worldMap.close();
             } else {
                 this.togglePause();
             }
@@ -485,14 +506,11 @@ export class PhaseScene extends Scene {
 
         this.handlePortals();
 
-        if (Input.Keyboard.JustDown(this.mapKey)) {
-            this.mapOverlay.setVisible(!this.mapOverlay.visible);
-            if (this.mapOverlay.visible) {
-                this.refreshMapNodes();
-            }
+        if (Input.Keyboard.JustDown(this.mapKey) && this.worldMap.toggle()) {
+            this.refreshMapNodes();
         }
 
-        if (this.mapOverlay.visible) {
+        if (this.worldMap.isOpen) {
             this.updateMapMarker();
         }
 
@@ -860,11 +878,16 @@ export class PhaseScene extends Scene {
         }
 
         this.lastHp = hp;
-        this.hpText.setText(this.heartString(hp, this.player.maxHp));
-    }
-
-    private heartString(current: number, max: number): string {
-        return '♥'.repeat(current) + '♡'.repeat(Math.max(0, max - current));
+        this.hpHearts.clear();
+        for (let index = 0; index < this.player.maxHp; index++) {
+            drawIcon(
+                this.hpHearts,
+                index < hp ? 'heart' : 'heartEmpty',
+                HUD_PANEL.x + 30 + index * 24,
+                HUD_PANEL.y + 60,
+                20
+            );
+        }
     }
 
     private buildPhysics() {
@@ -1007,54 +1030,42 @@ export class PhaseScene extends Scene {
     }
 
     private createHud() {
+        // Tábua de madeira com o nome da fase num pergaminho; os corações vão
+        // logo abaixo e o CombatHud completa com mana e arma.
         const ui = this.add.graphics().setDepth(30).setScrollFactor(0);
-        ui.fillStyle(0x10212b, 0.75).fillRoundedRect(24, 22, 320, 74, 6);
-        ui.lineStyle(2, 0xb8cc84, 0.55).strokeRoundedRect(24, 22, 320, 74, 6);
+        drawWoodFrame(ui, HUD_PANEL.x, HUD_PANEL.y, HUD_PANEL.width, HUD_PANEL.height);
+        drawParchment(ui, HUD_PANEL.x + 10, HUD_PANEL.y + 10, HUD_PANEL.width - 20, 30);
 
         const nameText = this.add
-            .text(43, 45, this.phase.name, { fontFamily: 'Georgia, serif', fontSize: '20px', color: '#f7e7b0' })
+            .text(HUD_PANEL.x + HUD_PANEL.width / 2, HUD_PANEL.y + 25, this.phase.name, uiText(17, UI_CSS.ink))
+            .setOrigin(0.5)
             .setDepth(31)
             .setScrollFactor(0);
 
-        this.hpText = this.add
-            .text(300, 50, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ff6b6b' })
-            .setOrigin(1, 0)
-            .setDepth(31)
-            .setScrollFactor(0);
+        // Corações por blocos, redesenhados só quando a vida muda.
+        this.hpHearts = this.add.graphics().setDepth(31).setScrollFactor(0);
         this.lastHp = -1;
 
-        const subtitleText = this.add
-            .text(43, 72, this.phase.subtitle, { fontFamily: 'monospace', fontSize: '11px', color: '#9db68d' })
-            .setDepth(31)
-            .setScrollFactor(0);
-
-        // === [B: mundo/vila] === (só o trecho "·  E interagir" no fim da linha)
-        const controlsHint =
-            'A/D mover  ·  Espaço pular  ·  Clique esq. atacar  ·  Clique dir. defender  ·  K dash  ·  W/↑ na parede: escalar  ·  E interagir';
-        // === [/B] ===
-
+        // A lista completa de controles fica na pausa; aqui só o caminho até ela.
         this.controlsText = this.add
-            .text(this.scale.width - 44, 30, controlsHint, {
-                fontFamily: 'monospace',
-                fontSize: '11px',
-                color: '#c0d9b1'
-            })
+            .text(this.scale.width - 24, 22, 'M mapa  ·  ESC pausa e controles', uiTextOutlined(14))
             .setOrigin(1, 0)
             .setDepth(31)
             .setScrollFactor(0);
 
-        this.hudObjects.push(ui, nameText, this.hpText, subtitleText, this.controlsText);
+        this.hudObjects.push(ui, nameText, this.hpHearts, this.controlsText);
 
+        // Gema do dash sobre a cabeça: verde pronta, âmbar recarregando.
         this.dashIndicator = this.add
-            .circle(this.player.x, this.player.y - 60, 6, 0x4ade80)
+            .rectangle(this.player.x, this.player.y - 60, 9, 9, 0x4ade80)
+            .setAngle(45)
             .setDepth(21)
-            .setStrokeStyle(2, 0xffffff, 0.6);
+            .setStrokeStyle(2, 0x1a0f08, 0.9);
 
         // === [A: combate] ===
-        // Encosta logo abaixo do painel de vida (PANEL_Y = 104, contra os 22+74
-        // deste) para os dois lerem como um bloco único de informação. Entra em
-        // hudObjects pelo mesmo motivo que o resto: o reflexo do lago captura a
-        // cena e não pode reproduzir HUD dentro d'água.
+        // Mana e arma dentro da mesma tábua. Entra em hudObjects pelo mesmo
+        // motivo que o resto: o reflexo do lago captura a cena e não pode
+        // reproduzir HUD dentro d'água.
         this.combatHud = new CombatHud(this, this.player);
         this.hudObjects.push(...this.combatHud.gameObjects);
         // === [/A] ===
@@ -1076,47 +1087,8 @@ export class PhaseScene extends Scene {
     private createMapOverlay() {
         this.mapKey = this.input.keyboard!.addKey(Input.Keyboard.KeyCodes.M);
 
-        this.mapPanel = this.add.graphics();
-
-        this.mapTitle = this.add
-            .text(0, 154, 'MAPA DO MUNDO', { fontFamily: 'Georgia, serif', fontSize: '30px', color: '#f7e7b0' })
-            .setOrigin(0.5);
-        this.mapHint = this.add
-            .text(0, 194, 'Pressione M para fechar', { fontFamily: 'monospace', fontSize: '13px', color: '#b9cbb1' })
-            .setOrigin(0.5);
-
-        this.mapRoute = this.add.graphics();
-        const mapY = 365;
-
-        const children: GameObjects.GameObject[] = [this.mapPanel, this.mapTitle, this.mapHint, this.mapRoute];
-        PHASES.forEach((phase) => {
-            const icon = this.add.graphics();
-            const label = this.add
-                .text(0, mapY + 39, phase.name, {
-                    fontFamily: 'monospace', fontSize: '10px', color: '#b9cbb1',
-                    align: 'center', wordWrap: { width: 100 }
-                })
-                .setOrigin(0.5, 0);
-            this.mapPhaseNodes.push({ icon, label, x: 0 });
-            children.push(icon, label);
-        });
-
-        this.mapMarker = this.add.star(0, mapY, 5, 5, 11, 0xff6b4a).setStrokeStyle(2, 0xfff2c2);
-        this.mapLocationText = this.add
-            .text(0, 535, '', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' })
-            .setOrigin(0.5);
-        children.push(this.mapMarker, this.mapLocationText);
-
-        this.mapOverlay = this.add.container(0, 0, children).setDepth(100).setScrollFactor(0).setVisible(false);
-        this.tweens.add({
-            targets: this.mapMarker,
-            scale: 1.15,
-            duration: 650,
-            yoyo: true,
-            repeat: -1,
-            ease: 'Sine.inOut'
-        });
-        this.repositionResponsiveUI();
+        // Pergaminho da jornada (ver ui/WorldMapOverlay.ts).
+        this.worldMap = new WorldMapOverlay(this, PHASES);
         this.refreshMapNodes();
         this.updateMapMarker();
     }
@@ -1124,26 +1096,28 @@ export class PhaseScene extends Scene {
     private createPauseOverlay() {
         this.pausePanelGraphics = this.add.graphics().setScrollFactor(0).setDepth(101);
         this.pauseTitle = this.add
-            .text(0, 340, 'PAUSADO', {
-                fontFamily: 'Georgia, serif',
-                fontSize: '28px',
-                color: '#f7e7b0'
-            })
+            .text(0, 0, 'PAUSADO', uiText(30, UI_CSS.ink))
             .setOrigin(0.5)
             .setScrollFactor(0)
             .setDepth(102);
+        // Duas colunas (ação e tecla): a fonte pixel não é monoespaçada, então
+        // alinhar com espaços no mesmo texto não funcionaria.
+        this.pauseLabels = this.add
+            .text(0, 0, PAUSE_CONTROLS.map(([label]) => label).join('\n'), uiText(15, UI_CSS.inkSoft, { lineSpacing: 8 }))
+            .setScrollFactor(0)
+            .setDepth(102);
+        this.pauseKeys = this.add
+            .text(0, 0, PAUSE_CONTROLS.map(([, keys]) => keys).join('\n'), uiText(15, UI_CSS.ink, { lineSpacing: 8 }))
+            .setScrollFactor(0)
+            .setDepth(102);
         this.pauseHint = this.add
-            .text(0, 400, 'ESC para continuar', {
-                fontFamily: 'monospace',
-                fontSize: '13px',
-                color: '#b9cbb1'
-            })
+            .text(0, 0, 'ESC para continuar', uiText(13, UI_CSS.inkSoft))
             .setOrigin(0.5)
             .setScrollFactor(0)
             .setDepth(102);
 
         this.pausePanel = this.add
-            .container(0, 0, [this.pausePanelGraphics, this.pauseTitle, this.pauseHint])
+            .container(0, 0, [this.pausePanelGraphics, this.pauseTitle, this.pauseLabels, this.pauseKeys, this.pauseHint])
             .setDepth(101)
             .setVisible(false);
         this.repositionPauseOverlay();
@@ -1172,104 +1146,10 @@ export class PhaseScene extends Scene {
             clearedPhases.add(this.phaseIndex);
         }
 
-        this.mapPhaseNodes.forEach(({ icon, label, x }, index) => {
-            const state: MapPhaseState = index > reachedPhase
-                ? 'locked'
-                : clearedPhases.has(index)
-                    ? 'cleared'
-                    : 'reached';
-
-            this.drawMapPhaseIcon(icon, x, 365, PHASES[index].key, state);
-            label.setColor(state === 'locked' ? '#66707a' : state === 'cleared' ? '#f7e7b0' : '#b9cbb1');
-            label.setAlpha(state === 'locked' ? 0.5 : 1);
-        });
-    }
-
-    private drawMapPhaseIcon(
-        graphics: GameObjects.Graphics,
-        x: number,
-        y: number,
-        phaseKey: string,
-        state: MapPhaseState
-    ) {
-        const isLocked = state === 'locked';
-        const color = isLocked ? 0x3a3a3a : this.mapBiomeColor(phaseKey);
-
-        graphics.clear();
-        graphics.setAlpha(isLocked ? 0.5 : 1);
-        graphics.fillStyle(color, 1);
-        graphics.lineStyle(2, isLocked ? 0x59616b : 0x10212b, 0.95);
-
-        switch (phaseKey) {
-            // === [B: mundo/vila] ===
-            // Casinha. Sem este case a vila ficaria com ícone invisível no
-            // mapa: o switch não tem default.
-            case 'village':
-                graphics.fillRect(x - 12, y - 4, 24, 18);
-                graphics.strokeRect(x - 12, y - 4, 24, 18);
-                graphics.fillTriangle(x - 16, y - 4, x + 16, y - 4, x, y - 18);
-                graphics.strokeTriangle(x - 16, y - 4, x + 16, y - 4, x, y - 18);
-                graphics.fillStyle(isLocked ? 0x3a3a3a : 0x4a3524, 1);
-                graphics.fillRect(x - 4, y + 4, 8, 10);
-                break;
-            // === [/B] ===
-            case 'forest':
-                graphics.fillTriangle(x, y - 17, x - 12, y + 9, x + 12, y + 9);
-                graphics.fillRect(x - 3, y + 7, 6, 7);
-                graphics.strokeTriangle(x, y - 17, x - 12, y + 9, x + 12, y + 9);
-                break;
-            case 'desert':
-                graphics.fillTriangle(x, y - 14, x - 14, y, x + 14, y);
-                graphics.fillTriangle(x, y + 14, x - 14, y, x + 14, y);
-                graphics.strokeTriangle(x, y - 14, x - 14, y, x + 14, y);
-                graphics.strokeTriangle(x, y + 14, x - 14, y, x + 14, y);
-                break;
-            case 'snow':
-                graphics.fillCircle(x, y, 12);
-                graphics.lineStyle(2, isLocked ? 0x59616b : 0xffffff, 0.9);
-                graphics.lineBetween(x - 14, y, x + 14, y);
-                graphics.lineBetween(x, y - 14, x, y + 14);
-                graphics.lineBetween(x - 10, y - 10, x + 10, y + 10);
-                graphics.lineBetween(x + 10, y - 10, x - 10, y + 10);
-                break;
-            case 'cave':
-                graphics.fillTriangle(x, y - 15, x - 14, y + 10, x + 14, y + 10);
-                graphics.fillTriangle(x, y + 15, x - 14, y - 10, x + 14, y - 10);
-                graphics.strokeTriangle(x, y - 15, x - 14, y + 10, x + 14, y + 10);
-                graphics.strokeTriangle(x, y + 15, x - 14, y - 10, x + 14, y - 10);
-                break;
-            case 'volcano':
-                graphics.fillTriangle(x, y - 16, x - 15, y + 12, x + 15, y + 12);
-                graphics.strokeTriangle(x, y - 16, x - 15, y + 12, x + 15, y + 12);
-                graphics.fillStyle(isLocked ? 0x3a3a3a : 0xffc847, 1).fillCircle(x, y + 3, 4);
-                break;
-            case 'ruins':
-                graphics.fillRect(x - 7, y - 15, 14, 30);
-                graphics.fillRect(x - 11, y - 15, 22, 5);
-                graphics.strokeRect(x - 7, y - 15, 14, 30);
-                break;
-        }
-
-        if (state === 'cleared') {
-            graphics.lineStyle(2, 0xf7e7b0, 1).strokeCircle(x, y, 20);
-            graphics.lineBetween(x - 7, y + 1, x - 1, y + 7);
-            graphics.lineBetween(x - 1, y + 7, x + 10, y - 7);
-        }
-    }
-
-    private mapBiomeColor(phaseKey: string): number {
-        switch (phaseKey) {
-            // === [B: mundo/vila] ===
-            case 'village': return 0xc9a227;
-            // === [/B] ===
-            case 'forest': return 0x4f9b5a;
-            case 'desert': return 0xe0b15c;
-            case 'snow': return 0x9ed6f5;
-            case 'cave': return 0x9a7bc0;
-            case 'volcano': return 0xe2683c;
-            case 'ruins': return 0xa8a286;
-            default: return 0x6f8b71;
-        }
+        const states = PHASES.map((_, index): MapPhaseState =>
+            index > reachedPhase ? 'locked' : clearedPhases.has(index) ? 'cleared' : 'reached'
+        );
+        this.worldMap.refresh(states);
     }
 
     // Captura a metade superior da cena e a exibe invertida na metade inferior.
@@ -1326,7 +1206,7 @@ export class PhaseScene extends Scene {
                 rt,
                 this.dashIndicator,
                 ...this.hudObjects,
-                this.mapOverlay,
+                ...this.worldMap.gameObjects,
                 this.pausePanel
             ]);
             this.lakeReflectionExcludedFor = rt;
@@ -1345,42 +1225,9 @@ export class PhaseScene extends Scene {
     }
 
     private repositionResponsiveUI() {
-        this.controlsText.x = this.scale.width - 44;
-
-        const centerX = this.scale.width / 2;
-        const panelX = centerX - 400;
-        const mapStartX = centerX - 324;
-        const mapEndX = centerX + 324;
-        const mapY = 365;
-        const segmentWidth = (mapEndX - mapStartX) / (PHASES.length - 1);
-
-        this.mapPanel.clear();
-        this.mapPanel.fillStyle(0x08111d, 0.94).fillRoundedRect(panelX, 118, 800, 532, 14);
-        this.mapPanel.lineStyle(2, 0xb8cc84, 0.85).strokeRoundedRect(panelX, 118, 800, 532, 14);
-
-        this.mapRoute.clear();
-        this.mapRoute.fillStyle(0x3e5266, 1);
-        for (let x = mapStartX; x <= mapEndX; x += 14) {
-            this.mapRoute.fillCircle(x, mapY, 3);
-        }
-        this.mapRoute.fillStyle(0xc8d897, 0.72);
-        for (let x = mapStartX + 3; x <= mapEndX; x += 14) {
-            this.mapRoute.fillCircle(x, mapY, 1);
-        }
-
-        this.mapTitle.x = centerX;
-        this.mapHint.x = centerX;
-        this.mapLocationText.x = centerX;
-
-        this.mapPhaseNodes.forEach((entry, index) => {
-            const x = mapStartX + segmentWidth * index;
-            entry.x = x;
-            entry.label.x = x;
-        });
-
-        this.refreshMapNodes();
+        // O mapa se reposiciona sozinho (WorldMapOverlay escuta o resize).
+        this.controlsText.x = this.scale.width - 24;
         this.repositionPauseOverlay();
-        this.updateMapMarker();
     }
 
     private repositionPauseOverlay() {
@@ -1388,25 +1235,27 @@ export class PhaseScene extends Scene {
             return;
         }
 
+        const width = 560;
+        const height = 440;
         const centerX = this.scale.width / 2;
-        const panelX = centerX - 150;
+        const left = centerX - width / 2;
+        const top = Math.max(24, this.scale.height / 2 - height / 2);
 
-        this.pausePanelGraphics.clear();
-        this.pausePanelGraphics.fillStyle(0x08111d, 0.92).fillRoundedRect(panelX, 284, 300, 200, 14);
-        this.pausePanelGraphics.lineStyle(2, 0xb8cc84, 0.85).strokeRoundedRect(panelX, 284, 300, 200, 14);
-        this.pauseTitle.x = centerX;
-        this.pauseHint.x = centerX;
+        const g = this.pausePanelGraphics;
+        g.clear();
+        drawWoodFrame(g, left - 12, top - 12, width + 24, height + 24);
+        drawParchment(g, left, top, width, height);
+        g.fillStyle(UI_COLORS.parchmentEdge, 0.5).fillRect(left + 40, top + 62, width - 80, 2);
+
+        this.pauseTitle.setPosition(centerX, top + 36);
+        this.pauseLabels.setPosition(left + 48, top + 82);
+        this.pauseKeys.setPosition(left + 200, top + 82);
+        this.pauseHint.setPosition(centerX, top + height - 26);
     }
 
     private updateMapMarker() {
-        const centerX = this.scale.width / 2;
-        const mapStartX = centerX - 324;
-        const mapEndX = centerX + 324;
         const phaseProgress = Math.max(0, Math.min(1, this.player.x / this.phaseWidth));
-        const worldProgress = (this.phaseIndex + phaseProgress) / (PHASES.length - 1);
-
-        this.mapMarker.x = mapStartX + (mapEndX - mapStartX) * worldProgress;
-        this.mapLocationText.setText(`${this.phase.name} - ${Math.round(phaseProgress * 100)}% explorado`);
+        this.worldMap.updateMarker(this.phaseIndex, phaseProgress, this.phase.name);
     }
 
 }

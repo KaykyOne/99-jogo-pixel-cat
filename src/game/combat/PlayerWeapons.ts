@@ -1,6 +1,7 @@
 import { Math as PhaserMath, Physics, Scene } from 'phaser';
 
 import { DamageSource } from '../damage/damage';
+import { UI_CSS, uiTextOutlined } from '../ui/ui-theme';
 import { Mana } from '../damage/Mana';
 import { PlayerCombat } from './PlayerCombat';
 import { ProjectileManager } from './Projectile';
@@ -317,11 +318,7 @@ export class PlayerWeapons {
     // jogador achar que a tecla não respondeu.
     private flashOutOfMana(): void {
         const text = this.scene.add
-            .text(this.owner.x, this.owner.y - 70, 'sem mana', {
-                fontFamily: 'monospace',
-                fontSize: '11px',
-                color: '#7fd4ff'
-            })
+            .text(this.owner.x, this.owner.y - 70, 'sem mana', uiTextOutlined(13, UI_CSS.mana))
             .setOrigin(0.5)
             .setDepth(25);
 

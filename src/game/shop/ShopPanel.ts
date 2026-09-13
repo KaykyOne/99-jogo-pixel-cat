@@ -5,21 +5,25 @@ import { CoinSystem } from '../items/CoinSystem';
 import { Inventory } from '../items/Inventory';
 import { drawItemBlocks } from '../items/item-art';
 import { ITEMS } from '../items/item-catalog';
+import { drawParchment, drawWoodFrame, UI_COLORS, UI_CSS, uiText, uiTextOutlined } from '../ui/ui-theme';
 import { ShopDef, ShopEntry, ShopId, SHOPS } from './shop-config';
 import { effectivePrice, executeTransaction } from './transaction';
 
-// Painel da loja. Herda a linguagem visual do resto da UI (mesma paleta, mesmo
-// arredondamento) e vive no depth 103, acima da pausa (101/102).
+// Painel da loja. Mesmo pergaminho com plaquinha de madeira do diálogo, no
+// depth 103, acima da pausa (101/102).
 //
 // SEM MOUSE, de propósito: o resto do jogo é teclado, e misturar os dois é pior
 // que escolher um. Setas ou W/S escolhem, E confirma, ESC fecha.
 const PANEL = {
     depth: 103,
-    width: 560,
-    height: 276,
+    width: 580,
+    height: 290,
     rowHeight: 38,
     messageMs: 1500
 } as const;
+
+const MESSAGE_OK = '#4f7a2a';
+const MESSAGE_FAIL = '#a8321f';
 
 export class ShopPanel {
     private readonly container: GameObjects.Container;
@@ -41,7 +45,7 @@ export class ShopPanel {
     private unsubscribeInventory?: () => void;
 
     // Quem abre um modal é quem emite 'ui:modal'. A cena escuta para desligar
-    // os controles do jogador, e o inventário escuta para não consumir 1..6.
+    // os controles do jogador, e o inventário escuta para travar as teclas dele.
     constructor(
         private readonly scene: Scene,
         private readonly inventory: Inventory,
@@ -51,21 +55,11 @@ export class ShopPanel {
         this.selection = scene.add.graphics();
         this.icons = scene.add.graphics();
 
-        this.title = scene.add
-            .text(0, 0, '', { fontFamily: 'Georgia, serif', fontSize: '19px', color: '#f7e7b0' });
-        this.coinText = scene.add
-            .text(0, 0, '', { fontFamily: 'monospace', fontSize: '14px', color: '#f5c542' })
-            .setOrigin(1, 0);
-        this.greeting = scene.add
-            .text(0, 0, '', { fontFamily: 'monospace', fontSize: '12px', color: '#9db68d' });
-        this.message = scene.add
-            .text(0, 0, '', { fontFamily: 'monospace', fontSize: '12px', color: '#ff6b6b' });
-        this.hint = scene.add
-            .text(0, 0, 'W/S ou setas escolher  ·  E confirmar  ·  ESC sair', {
-                fontFamily: 'monospace',
-                fontSize: '11px',
-                color: '#b9cbb1'
-            });
+        this.title = scene.add.text(0, 0, '', uiTextOutlined(18, UI_CSS.cream));
+        this.coinText = scene.add.text(0, 0, '', uiText(15, UI_CSS.ink)).setOrigin(1, 0);
+        this.greeting = scene.add.text(0, 0, '', uiText(13, UI_CSS.inkSoft));
+        this.message = scene.add.text(0, 0, '', uiText(13, MESSAGE_FAIL));
+        this.hint = scene.add.text(0, 0, 'W/S ou setas escolher  ·  E confirmar  ·  ESC sair', uiText(12, UI_CSS.inkSoft));
 
         this.container = scene.add
             .container(0, 0, [
@@ -186,7 +180,7 @@ export class ShopPanel {
         const result = executeTransaction(this.inventory, this.coins, entry, getDifficultyModifiersFor(this.scene));
 
         // Falha nunca é silenciosa: a recusa aparece escrita, e nada é perdido.
-        this.message.setColor(result.ok ? '#b8cc84' : '#ff6b6b');
+        this.message.setColor(result.ok ? MESSAGE_OK : MESSAGE_FAIL);
         this.message.setText(result.message);
         this.messageUntil = this.scene.time.now + PANEL.messageMs;
 
@@ -200,11 +194,7 @@ export class ShopPanel {
         this.rows = [];
 
         for (const entry of this.shop?.entries ?? []) {
-            const text = this.scene.add.text(0, 0, this.rowLabel(entry), {
-                fontFamily: 'monospace',
-                fontSize: '14px',
-                color: '#e8e4dc'
-            });
+            const text = this.scene.add.text(0, 0, this.rowLabel(entry), uiText(15, UI_CSS.inkSoft));
             this.rows.push(text);
             this.container.add(text);
         }
@@ -239,45 +229,47 @@ export class ShopPanel {
         const left = (this.scene.scale.width - PANEL.width) / 2;
         const top = Math.max(60, (this.scene.scale.height - PANEL.height) / 2);
 
-        this.panel.clear();
-        this.panel.fillStyle(0x08111d, 0.94).fillRoundedRect(left, top, PANEL.width, PANEL.height, 14);
-        this.panel.lineStyle(2, 0xb8cc84, 0.85).strokeRoundedRect(left, top, PANEL.width, PANEL.height, 14);
-        // Separadores do cabeçalho e do rodapé.
-        this.panel.lineStyle(1, 0xb8cc84, 0.35);
-        this.panel.lineBetween(left + 18, top + 78, left + PANEL.width - 18, top + 78);
-        this.panel.lineBetween(left + 18, top + PANEL.height - 44, left + PANEL.width - 18, top + PANEL.height - 44);
-
-        this.title.setPosition(left + 24, top + 22);
         this.title.setText(this.shop.name);
+
+        this.panel.clear();
+        drawParchment(this.panel, left, top, PANEL.width, PANEL.height);
+        // Separadores de tinta do cabeçalho e do rodapé.
+        this.panel.fillStyle(UI_COLORS.parchmentEdge, 0.45);
+        this.panel.fillRect(left + 20, top + 76, PANEL.width - 40, 2);
+        this.panel.fillRect(left + 20, top + PANEL.height - 46, PANEL.width - 40, 2);
+        // Plaquinha com o nome da loja.
+        const plateWidth = Math.max(160, this.title.width + 40);
+        drawWoodFrame(this.panel, left + 20, top - 20, plateWidth, 38);
+        this.title.setPosition(left + 40, top - 11);
 
         // Ícone de moeda por blocos ao lado do saldo (sem asset).
         this.icons.clear();
-        drawItemBlocks(this.icons, 'coin', left + PANEL.width - 24 - 108, top + 32, 18);
-        this.coinText.setPosition(left + PANEL.width - 24, top + 24);
+        this.coinText.setPosition(left + PANEL.width - 26, top + 26);
+        drawItemBlocks(this.icons, 'coin', left + PANEL.width - 26 - this.coinText.width - 16, top + 36, 18);
 
-        this.greeting.setPosition(left + 24, top + 50);
+        this.greeting.setPosition(left + 26, top + 48);
         this.greeting.setText(this.shop.greeting);
 
-        const rowsTop = top + 94;
+        const rowsTop = top + 92;
         this.selection.clear();
         this.rows.forEach((row, index) => {
             const y = rowsTop + index * PANEL.rowHeight;
-            row.setPosition(left + 46, y + 9);
-            row.setColor(index === this.selectedIndex ? '#f7e7b0' : '#e8e4dc');
+            const selected = index === this.selectedIndex;
+            row.setPosition(left + 48, y + 8);
+            row.setColor(selected ? UI_CSS.ink : UI_CSS.inkSoft);
 
-            if (index === this.selectedIndex) {
-                // Mesmo destaque dos botões do menu.
+            if (selected) {
                 this.selection
-                    .fillStyle(0x294b35, 1)
-                    .fillRoundedRect(left + 20, y, PANEL.width - 40, PANEL.rowHeight - 6, 6);
+                    .fillStyle(UI_COLORS.parchmentShade, 1)
+                    .fillRect(left + 20, y, PANEL.width - 40, PANEL.rowHeight - 6);
                 this.selection
-                    .fillStyle(0xf7e7b0, 1)
+                    .fillStyle(UI_COLORS.goldDark, 1)
                     .fillTriangle(left + 30, y + 10, left + 30, y + 22, left + 39, y + 16);
             }
         });
 
-        this.message.setPosition(left + 24, top + PANEL.height - 74);
-        this.hint.setPosition(left + 24, top + PANEL.height - 32);
+        this.message.setPosition(left + 26, top + PANEL.height - 72);
+        this.hint.setPosition(left + 26, top + PANEL.height - 34);
 
         this.refreshTexts();
     }

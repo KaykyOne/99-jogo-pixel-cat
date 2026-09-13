@@ -1,5 +1,6 @@
 import { GameObjects, Scene, Tweens } from 'phaser';
 
+import { drawKeyCap, UI_CSS, uiText } from '../ui/ui-theme';
 import { NpcDef, NPC_UI } from '../world/npc-config';
 import { GROUND_Y } from '../world/phases';
 
@@ -120,12 +121,9 @@ export class Npc extends GameObjects.Container {
 
     private createIcon(scene: Scene): GameObjects.Container {
         const box = scene.add.graphics();
-        box.fillStyle(0x10212b, 0.85).fillRoundedRect(-13, -13, 26, 26, 6);
-        box.lineStyle(2, 0xb8cc84, 1).strokeRoundedRect(-13, -13, 26, 26, 6);
+        drawKeyCap(box, 0, 0, 28);
 
-        const label = scene.add
-            .text(0, 0, 'E', { fontFamily: 'monospace', fontSize: '15px', color: '#f7e7b0' })
-            .setOrigin(0.5);
+        const label = scene.add.text(0, -2, 'E', uiText(17, UI_CSS.ink)).setOrigin(0.5);
 
         // Objeto de cena, e não filho do NPC: dentro de um Container o depth do
         // filho é ignorado (vale o do pai), e o ícone precisa do seu próprio

@@ -1,15 +1,17 @@
-import { GameObjects, Input, Scene, Time } from 'phaser';
+import { GameObjects, Input, Scene, Time, Types } from 'phaser';
 
 import { NPC_UI } from '../world/npc-config';
+import { drawParchment, drawWoodFrame, UI_COLORS, UI_CSS, uiText, uiTextOutlined } from './ui-theme';
 
-// Caixa de diálogo. Painel inferior fixo, na mesma paleta do painel de pausa
-// (ver repositionPauseOverlay em Game.ts) e no depth 103 — acima da pausa
+// Caixa de diálogo. Pergaminho no rodapé com o nome de quem fala numa
+// plaquinha de madeira sobre a borda, no depth 103 — acima da pausa
 // (101/102), porque diálogo e pausa nunca coexistem e, se coexistissem, quem
 // tem que aparecer é o diálogo.
 const PANEL_DEPTH = 103;
 const PANEL_HEIGHT = 150;
 const PANEL_MARGIN_X = 60;
-const PANEL_BOTTOM_GAP = 100;
+// Acima da barra de inventário E do pergaminho com o nome do item escolhido.
+const PANEL_BOTTOM_GAP = 132;
 
 export type DialogueOption = {
     label: string;
@@ -54,9 +56,9 @@ export class DialogueBox {
         this.scene = scene;
 
         this.panel = scene.add.graphics().setScrollFactor(0).setDepth(PANEL_DEPTH).setVisible(false);
-        this.speakerText = this.makeText('Georgia, serif', '18px', '#f7e7b0');
-        this.bodyText = this.makeText('monospace', '14px', '#e8e4dc');
-        this.footerText = this.makeText('monospace', '11px', '#9db68d');
+        this.speakerText = this.makeText(uiTextOutlined(16, UI_CSS.cream));
+        this.bodyText = this.makeText(uiText(16, UI_CSS.ink, { lineSpacing: 4 }));
+        this.footerText = this.makeText(uiText(12, UI_CSS.inkSoft));
         this.optionCursor = scene.add
             .graphics()
             .setScrollFactor(0)
@@ -207,11 +209,7 @@ export class DialogueBox {
 
         this.optionTexts = this.options.map((option, index) =>
             this.scene.add
-                .text(0, 0, option.label, {
-                    fontFamily: 'monospace',
-                    fontSize: '14px',
-                    color: index === 0 ? '#f7e7b0' : '#b9cbb1'
-                })
+                .text(0, 0, option.label, uiText(16, index === 0 ? UI_CSS.ink : UI_CSS.inkSoft))
                 .setScrollFactor(0)
                 .setDepth(PANEL_DEPTH + 0.2)
         );
@@ -225,7 +223,7 @@ export class DialogueBox {
         this.selected = (this.selected + delta + total) % total;
 
         this.optionTexts.forEach((text, index) => {
-            text.setColor(index === this.selected ? '#f7e7b0' : '#b9cbb1');
+            text.setColor(index === this.selected ? UI_CSS.ink : UI_CSS.inkSoft);
         });
 
         this.layout();
@@ -242,9 +240,9 @@ export class DialogueBox {
         this.footerText.setText(`${advance}  ·  ESC fechar`);
     }
 
-    private makeText(fontFamily: string, fontSize: string, color: string): GameObjects.Text {
+    private makeText(style: Types.GameObjects.Text.TextStyle): GameObjects.Text {
         return this.scene.add
-            .text(0, 0, '', { fontFamily, fontSize, color })
+            .text(0, 0, '', style)
             .setScrollFactor(0)
             .setDepth(PANEL_DEPTH + 0.1)
             .setVisible(false);
@@ -275,30 +273,35 @@ export class DialogueBox {
 
         const width = this.scene.scale.width;
         const height = this.scene.scale.height;
-        const panelWidth = Math.max(360, width - PANEL_MARGIN_X * 2);
+        const panelWidth = Math.min(900, Math.max(360, width - PANEL_MARGIN_X * 2));
         const x = (width - panelWidth) / 2;
         const y = height - PANEL_BOTTOM_GAP - PANEL_HEIGHT;
 
         this.panel.clear();
-        this.panel.fillStyle(0x08111d, 0.94).fillRoundedRect(x, y, panelWidth, PANEL_HEIGHT, 14);
-        this.panel.lineStyle(2, 0xb8cc84, 0.85).strokeRoundedRect(x, y, panelWidth, PANEL_HEIGHT, 14);
-        this.panel.lineStyle(1, 0xb8cc84, 0.35).lineBetween(x + 20, y + 44, x + panelWidth - 20, y + 44);
+        drawParchment(this.panel, x, y, panelWidth, PANEL_HEIGHT);
 
-        this.speakerText.setPosition(x + 22, y + 14);
-        this.bodyText.setPosition(x + 22, y + 58);
-        this.bodyText.setWordWrapWidth(panelWidth - 44);
-        this.footerText.setPosition(x + 22, y + PANEL_HEIGHT - 24);
+        // Plaquinha com o nome, pregada sobre a borda de cima.
+        const plateWidth = Math.max(140, this.speakerText.width + 40);
+        drawWoodFrame(this.panel, x + 20, y - 20, plateWidth, 38);
+        this.speakerText.setPosition(x + 40, y - 11);
+
+        this.bodyText.setPosition(x + 28, y + 34);
+        this.bodyText.setWordWrapWidth(panelWidth - 56);
+        this.footerText.setPosition(x + 28, y + PANEL_HEIGHT - 30);
 
         this.optionTexts.forEach((text, index) => {
-            text.setPosition(x + 46, y + 60 + index * 26);
+            text.setPosition(x + 52, y + 34 + index * 28);
         });
 
         if (this.optionTexts.length > 0) {
-            const cursorY = y + 56 + this.selected * 26;
+            const cursorY = y + 30 + this.selected * 28;
             this.optionCursor.clear();
             this.optionCursor
-                .fillStyle(0x294b35, 1)
-                .fillRoundedRect(x + 22, cursorY, panelWidth - 44, 24, 5);
+                .fillStyle(UI_COLORS.parchmentShade, 1)
+                .fillRect(x + 22, cursorY, panelWidth - 44, 26);
+            this.optionCursor
+                .fillStyle(UI_COLORS.goldDark, 1)
+                .fillTriangle(x + 32, cursorY + 7, x + 32, cursorY + 19, x + 41, cursorY + 13);
             this.optionCursor.setVisible(true);
         }
     }

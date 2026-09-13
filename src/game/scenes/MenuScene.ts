@@ -2,6 +2,7 @@ import { GameObjects, Scene } from 'phaser';
 
 import { BOSS_INTROS_SEEN_KEY } from '../entities/bosses/boss-config';
 import { Difficulty, loadSave, writeSave } from '../state/save';
+import { drawIcon, drawParchment, drawWoodFrame, UI_COLORS, UI_CSS, uiText, uiTextOutlined } from '../ui/ui-theme';
 import { PHASES } from '../world/phases';
 
 const MENU_WIDTH = 1024;
@@ -18,31 +19,26 @@ export class MenuScene extends Scene {
 
     create() {
         this.background = this.add
-            .rectangle(0, 0, this.scale.width, this.scale.height, 0x08111d, 0.94)
+            .rectangle(0, 0, this.scale.width, this.scale.height, 0x140d08, 0.96)
             .setOrigin(0);
         this.content = this.add.container(this.menuOffsetX, 0);
 
+        const crown = this.add.graphics();
+        drawIcon(crown, 'crown', MENU_WIDTH / 2, 110, 54);
+
         const title = this.add
-            .text(MENU_WIDTH / 2, 170, 'JOGO 99', {
-                fontFamily: 'Georgia, serif',
-                fontSize: '48px',
-                color: '#f7e7b0'
-            })
+            .text(MENU_WIDTH / 2, 175, 'JOGO 99', uiTextOutlined(56, UI_CSS.gold, { strokeThickness: 6 }))
             .setOrigin(0.5);
         const subtitle = this.add
-            .text(MENU_WIDTH / 2, 230, 'A jornada entre os mundos', {
-                fontFamily: 'monospace',
-                fontSize: '15px',
-                color: '#9db68d'
-            })
+            .text(MENU_WIDTH / 2, 228, 'A jornada entre os mundos', uiTextOutlined(17, UI_CSS.cream))
             .setOrigin(0.5);
 
-        this.mainPanel = this.createPanel(512, 390, 500, 245);
-        this.difficultyPanel = this.createPanel(512, 390, 500, 245).setVisible(false);
+        this.mainPanel = this.createPanel(512, 390, 500, 250);
+        this.difficultyPanel = this.createPanel(512, 390, 500, 250).setVisible(false);
 
         this.createMainOptions();
         this.createDifficultyOptions();
-        this.content.add([title, subtitle, this.mainPanel, this.difficultyPanel]);
+        this.content.add([crown, title, subtitle, this.mainPanel, this.difficultyPanel]);
 
         this.scale.off('resize', this.repositionLayout, this);
         this.scale.on('resize', this.repositionLayout, this);
@@ -54,11 +50,7 @@ export class MenuScene extends Scene {
     private createMainOptions() {
         const save = loadSave();
         const title = this.add
-            .text(512, 315, save ? 'RETOMAR JORNADA' : 'NOVA JORNADA', {
-                fontFamily: 'Georgia, serif',
-                fontSize: '25px',
-                color: '#f7e7b0'
-            })
+            .text(512, 312, save ? 'RETOMAR JORNADA' : 'NOVA JORNADA', uiText(24, UI_CSS.ink))
             .setOrigin(0.5);
         this.mainPanel.add(title);
 
@@ -92,18 +84,10 @@ export class MenuScene extends Scene {
 
     private createDifficultyOptions() {
         const title = this.add
-            .text(512, 315, 'ESCOLHA A DIFICULDADE', {
-                fontFamily: 'Georgia, serif',
-                fontSize: '25px',
-                color: '#f7e7b0'
-            })
+            .text(512, 312, 'ESCOLHA A DIFICULDADE', uiText(24, UI_CSS.ink))
             .setOrigin(0.5);
         const subtitle = this.add
-            .text(512, 350, 'Normal reinicia a fase; Difícil reinicia a jornada.', {
-                fontFamily: 'monospace',
-                fontSize: '12px',
-                color: '#c0d9b1'
-            })
+            .text(512, 346, 'Normal reinicia a fase; Difícil reinicia a jornada.', uiText(13, UI_CSS.inkSoft))
             .setOrigin(0.5);
 
         this.difficultyPanel.add([title, subtitle]);
@@ -115,29 +99,32 @@ export class MenuScene extends Scene {
         );
     }
 
+    // Pergaminho emoldurado em madeira.
     private createPanel(x: number, y: number, width: number, height: number): GameObjects.Container {
-        const background = this.add.rectangle(x, y, width, height, 0x10212b, 0.9);
-        const border = this.add
-            .rectangle(x, y, width, height, 0x10212b, 0)
-            .setStrokeStyle(2, 0xb8cc84, 0.7);
-        return this.add.container(0, 0, [background, border]);
+        const graphics = this.add.graphics();
+        const left = x - width / 2;
+        const top = y - height / 2;
+        drawWoodFrame(graphics, left - 12, top - 12, width + 24, height + 24);
+        drawParchment(graphics, left, top, width, height);
+        return this.add.container(0, 0, [graphics]);
     }
 
+    // Tábua de madeira clicável.
     private createButton(x: number, y: number, label: string, action: () => void): GameObjects.Container {
         const background = this.add
-            .rectangle(x, y, 380, 48, 0x294b35, 1)
-            .setStrokeStyle(2, 0xb8cc84, 0.8)
+            .rectangle(x, y, 380, 48, UI_COLORS.woodMid, 1)
+            .setStrokeStyle(3, UI_COLORS.woodDark, 1)
             .setInteractive({ useHandCursor: true });
-        const text = this.add
-            .text(x, y, label, {
-                fontFamily: 'monospace',
-                fontSize: '15px',
-                color: '#f7e7b0'
-            })
-            .setOrigin(0.5);
+        const text = this.add.text(x, y, label, uiTextOutlined(17, UI_CSS.cream)).setOrigin(0.5);
 
-        background.on('pointerover', () => background.setFillStyle(0x3e5266));
-        background.on('pointerout', () => background.setFillStyle(0x294b35));
+        background.on('pointerover', () => {
+            background.setFillStyle(UI_COLORS.woodLight);
+            text.setColor(UI_CSS.gold);
+        });
+        background.on('pointerout', () => {
+            background.setFillStyle(UI_COLORS.woodMid);
+            text.setColor(UI_CSS.cream);
+        });
         background.on('pointerdown', action);
 
         return this.add.container(0, 0, [background, text]);
