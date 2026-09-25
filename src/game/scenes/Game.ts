@@ -2,16 +2,16 @@ import { GameObjects, Geom, Input, Physics, Scene } from 'phaser';
 
 // === [A: combate] ===
 import { CombatHud } from '../combat/CombatHud';
+import { ControlAction, controlLabel, keyLabel, loadControls } from '../config/controls';
 import { MeleeHitbox } from '../combat/MeleeHitbox';
 import { ProjectileManager } from '../combat/Projectile';
 import { ProjectileTarget } from '../combat/types';
 import { createBoss } from '../entities/bosses/boss-factory';
 import { BossBase, BossIntroRequest } from '../entities/bosses/BossBase';
-import { ForestBoss } from '../entities/bosses/ForestBoss';
 // === [/A] ===
 import { DamageSource } from '../damage/damage';
 import { EnemyType } from '../damage/health-config';
-import { BaseEnemy } from '../entities/BaseEnemy';
+import { BaseEnemy, EnemyDiedEvent } from '../entities/BaseEnemy';
 import { createEnemy } from '../entities/enemy-factory';
 import { Player } from '../entities/Player';
 // === [C: itens/economia] ===
@@ -85,21 +85,27 @@ const PHASE_START_X = 200;
 const DEATH_ANIMATION_MS = 600;
 
 // Controles listados na pausa. O HUD não repete isto: só aponta para a pausa.
-const PAUSE_CONTROLS: readonly [label: string, keys: string][] = [
-    ['Andar', 'A / D'],
-    ['Pular', 'Espaço'],
-    ['Dash', 'K'],
-    ['Escalar', 'W ou ↑ encostado na parede'],
-    ['Atacar', 'Clique esquerdo'],
-    ['Defender', 'Clique direito (segurar)'],
-    ['Trocar arma', '1 / 2 / 3'],
-    ['Trocar magia', 'Q (com o cajado)'],
-    ['Mochila', 'Roda do mouse ou Tab escolhe'],
-    ['Usar / largar', 'F usa  ·  G larga  ·  Shift+G tudo'],
-    ['Cura rápida', 'R'],
-    ['Conversar', 'E'],
-    ['Mapa', 'M']
-];
+// Montado a partir das teclas configuradas no menu (ver config/controls.ts).
+function pauseControls(): [label: string, keys: string][] {
+    const c = loadControls();
+    const k = (action: ControlAction) => keyLabel(c[action]);
+    return [
+        ['Andar', `${k('left')} / ${k('right')}`],
+        ['Pular', k('jump')],
+        ['Dash', k('dash')],
+        ['Escalar', `${k('climb')} na parede  ·  ${k('up')} / ${k('down')}`],
+        ['Atacar', `${k('attack')} ou clique esquerdo`],
+        ['Defender', `${k('parry')} ou clique direito (segurar)`],
+        ['Trocar arma', `${k('weaponSword')} / ${k('weaponBow')} / ${k('weaponStaff')}`],
+        ['Trocar magia', `${k('spellCycle')} (com o cajado)`],
+        ['Usar slot 1-3', `${k('slot1')} / ${k('slot2')} / ${k('slot3')}`],
+        ['Mochila', `Roda do mouse ou ${k('nextSlot')} / ${k('prevSlot')}`],
+        ['Usar / largar', `${k('useItem')} usa  ·  ${k('dropItem')} larga  ·  ${k('dropStack')} tudo`],
+        ['Cura rápida', k('quickHeal')],
+        ['Conversar', k('interact')],
+        ['Mapa', k('map')]
+    ];
+}
 
 export class PhaseScene extends Scene {
     private phase: PhaseDefinition;
@@ -113,6 +119,10 @@ export class PhaseScene extends Scene {
     private portals: Portal[] = [];
     private teleporting = false;
     private phaseCleared = false;
+    // O boss desta fase já tinha sido derrotado antes e não nasceu de novo.
+    // Só para o teste de fase limpa: sem ele, uma fase cujo único inimigo
+    // restante fosse o boss ficaria com `enemies` vazio e nunca "limparia".
+    private bossSkipped = false;
     private mapKey!: Input.Keyboard.Key;
     private pauseKey!: Input.Keyboard.Key;
     private isPaused = false;
@@ -135,10 +145,6 @@ export class PhaseScene extends Scene {
     // === [A: combate] ===
     // Barra de mana e arma equipada. A cena só instancia e chama update().
     private combatHud!: CombatHud;
-    // Boss da floresta, guardado para a cena adotar os inimigos que ele invoca
-    // na fase 2 — sem collider e sem entrar em `enemies`, um invocado
-    // atravessaria o chão e nunca contaria para a fase ficar limpa.
-    private forestBoss?: ForestBoss;
     // Colliders da fase, guardados para poder aplicá-los a um inimigo que
     // nasce DEPOIS do create (os invocados do boss).
     private solidColliders: GameObjects.GameObject[] = [];
@@ -188,12 +194,12 @@ export class PhaseScene extends Scene {
         this.hudObjects = [];
         this.teleporting = false;
         this.phaseCleared = false;
+        this.bossSkipped = false;
         this.lastHp = -1;
         this.isPaused = false;
         this.lakeReflection = undefined;
         this.wantsLakeReflection = false;
         // === [A: combate] ===
-        this.forestBoss = undefined;
         // === [/A] ===
 
         const difficulty = (this.registry.get('difficulty') as Difficulty) ?? 'normal';
@@ -213,6 +219,11 @@ export class PhaseScene extends Scene {
             difficulty,
             clearedPhases: loadSave()?.clearedPhases ?? []
         });
+
+        // Fase já concluída numa visita anterior: os inimigos comuns voltam,
+        // mas o portal de saída nasce aberto. Assim dá para ir e voltar pelas
+        // fases (até os NPCs) sem precisar limpar tudo de novo.
+        this.phaseCleared = (loadSave()?.clearedPhases ?? []).includes(this.phaseIndex);
 
         // Mundo plano de 768px em todas as fases: o terreno simplificado não
         // tem mais nada acima do topo da tela.
@@ -353,10 +364,12 @@ export class PhaseScene extends Scene {
         this.createMapOverlay();
         this.createPauseOverlay();
 
-        this.pauseKey = this.input.keyboard!.addKey(Input.Keyboard.KeyCodes.ESC);
+        this.pauseKey = this.input.keyboard!.addKey(loadControls().pause);
 
         // Fala de abertura dos bosses (ver BossBase.updateIntro).
         this.events.on('boss:intro', this.handleBossIntro, this);
+        // Registra no save o boss derrotado, para ele não voltar mais.
+        this.events.on('enemy:died', this.handleEnemyDied, this);
 
         const camera = this.cameras.main;
         camera.setBounds(0, 0, this.phaseWidth, HEIGHT);
@@ -382,6 +395,7 @@ export class PhaseScene extends Scene {
             this.worldMap.destroy();
             this.events.off('combat:impact', this.applyImpactFeel, this);
             this.events.off('boss:intro', this.handleBossIntro, this);
+            this.events.off('enemy:died', this.handleEnemyDied, this);
             // === [/A] ===
             this.projectiles.destroyAll();
             this.scale.off('resize', this.repositionResponsiveUI, this);
@@ -478,16 +492,9 @@ export class PhaseScene extends Scene {
 
         this.projectiles.update();
 
-        // === [A: combate] ===
-        // Antes do teste de fase limpa, e não depois: um invocado que nasceu
-        // neste frame precisa já estar em `enemies` quando a cena pergunta se
-        // sobrou alguém vivo, senão o portal abre no meio da fase 2 do boss.
-        this.adoptBossSummons();
-        // === [/A] ===
-
         if (
             !this.phaseCleared &&
-            this.enemies.length > 0 &&
+            (this.enemies.length > 0 || this.bossSkipped) &&
             this.enemies.every(enemy => !enemy.isAlive)
         ) {
             this.phaseCleared = true;
@@ -706,6 +713,12 @@ export class PhaseScene extends Scene {
         // PHASES[0] e qualquer índice chumbado apontaria para o boss errado.
         // As fases sem boss dedicado continuam com o genérico (ver
         // bosses/boss-factory.ts).
+        // Boss só se derrota uma vez: depois disso a arena fica vazia.
+        if ((loadSave()?.defeatedBosses ?? []).includes(this.phase.key)) {
+            this.bossSkipped = true;
+            return;
+        }
+
         const boss = createBoss(this, this.phase.key, bossX, GROUND_Y - 120, this.player);
         if (!boss) {
             return;
@@ -722,10 +735,16 @@ export class PhaseScene extends Scene {
         if (boss instanceof BossBase) {
             this.hudObjects.push(...boss.hudObjects);
         }
+    }
 
-        if (boss instanceof ForestBoss) {
-            this.forestBoss = boss;
+    private handleEnemyDied(event: EnemyDiedEvent) {
+        if (!event.isBoss) {
+            return;
         }
+
+        const defeatedBosses = new Set(loadSave()?.defeatedBosses ?? []);
+        defeatedBosses.add(this.phase.key);
+        saveProgress(this, { defeatedBosses: Array.from(defeatedBosses) });
     }
 
     // Fala de abertura do boss. O NpcManager já trava a cena inteira enquanto
@@ -764,20 +783,6 @@ export class PhaseScene extends Scene {
             () => !this.player.dash.isDashing,
             this
         );
-    }
-
-    // Recolhe os inimigos invocados pelo boss da floresta na fase 2 e os adota
-    // como inimigos da fase: senão eles nunca contariam para "fase limpa" e o
-    // portal ficaria trancado mesmo com a arena vazia.
-    private adoptBossSummons() {
-        if (!this.forestBoss) {
-            return;
-        }
-
-        for (const summon of this.forestBoss.collectSummons()) {
-            this.attachEnemyPhysics(summon);
-            this.enemies.push(summon);
-        }
     }
 
     // Peso do impacto. Hit-stop e shake vêm da DEFINIÇÃO do golpe (o
@@ -933,8 +938,9 @@ export class PhaseScene extends Scene {
             const sprite = this.createPortalSprite(bx);
             // === [B: mundo/vila] ===
             // Na zona segura o portal já nasce liberado — e precisa PARECER
-            // liberado, senão o jogador nem tenta atravessar.
-            if (this.phase.safeZone) {
+            // liberado, senão o jogador nem tenta atravessar. O mesmo vale
+            // para uma fase já concluída antes.
+            if (this.phase.safeZone || this.phaseCleared) {
                 sprite.play('portal-active-loop');
             }
             // === [/B] ===
@@ -1048,7 +1054,12 @@ export class PhaseScene extends Scene {
 
         // A lista completa de controles fica na pausa; aqui só o caminho até ela.
         this.controlsText = this.add
-            .text(this.scale.width - 24, 22, 'M mapa  ·  ESC pausa e controles', uiTextOutlined(14))
+            .text(
+                this.scale.width - 24,
+                22,
+                `${controlLabel('map')} mapa  ·  ${controlLabel('pause')} pausa e controles`,
+                uiTextOutlined(14)
+            )
             .setOrigin(1, 0)
             .setDepth(31)
             .setScrollFactor(0);
@@ -1085,7 +1096,7 @@ export class PhaseScene extends Scene {
     }
 
     private createMapOverlay() {
-        this.mapKey = this.input.keyboard!.addKey(Input.Keyboard.KeyCodes.M);
+        this.mapKey = this.input.keyboard!.addKey(loadControls().map);
 
         // Pergaminho da jornada (ver ui/WorldMapOverlay.ts).
         this.worldMap = new WorldMapOverlay(this, PHASES);
@@ -1102,16 +1113,17 @@ export class PhaseScene extends Scene {
             .setDepth(102);
         // Duas colunas (ação e tecla): a fonte pixel não é monoespaçada, então
         // alinhar com espaços no mesmo texto não funcionaria.
+        const controls = pauseControls();
         this.pauseLabels = this.add
-            .text(0, 0, PAUSE_CONTROLS.map(([label]) => label).join('\n'), uiText(15, UI_CSS.inkSoft, { lineSpacing: 8 }))
+            .text(0, 0, controls.map(([label]) => label).join('\n'), uiText(15, UI_CSS.inkSoft, { lineSpacing: 8 }))
             .setScrollFactor(0)
             .setDepth(102);
         this.pauseKeys = this.add
-            .text(0, 0, PAUSE_CONTROLS.map(([, keys]) => keys).join('\n'), uiText(15, UI_CSS.ink, { lineSpacing: 8 }))
+            .text(0, 0, controls.map(([, keys]) => keys).join('\n'), uiText(15, UI_CSS.ink, { lineSpacing: 8 }))
             .setScrollFactor(0)
             .setDepth(102);
         this.pauseHint = this.add
-            .text(0, 0, 'ESC para continuar', uiText(13, UI_CSS.inkSoft))
+            .text(0, 0, `${controlLabel('pause')} para continuar`, uiText(13, UI_CSS.inkSoft))
             .setOrigin(0.5)
             .setScrollFactor(0)
             .setDepth(102);
@@ -1146,8 +1158,13 @@ export class PhaseScene extends Scene {
             clearedPhases.add(this.phaseIndex);
         }
 
+        // Voltar para uma fase anterior regrava phaseIndex mais baixo no save;
+        // sem olhar as fases concluídas, o mapa trancaria as que o jogador já
+        // venceu. A fase logo depois da última concluída também já é alcançável.
+        const furthestCleared = Math.max(-1, ...clearedPhases);
+        const reached = Math.max(reachedPhase, furthestCleared + 1);
         const states = PHASES.map((_, index): MapPhaseState =>
-            index > reachedPhase ? 'locked' : clearedPhases.has(index) ? 'cleared' : 'reached'
+            clearedPhases.has(index) ? 'cleared' : index > reached ? 'locked' : 'reached'
         );
         this.worldMap.refresh(states);
     }
@@ -1235,8 +1252,8 @@ export class PhaseScene extends Scene {
             return;
         }
 
-        const width = 560;
-        const height = 440;
+        const width = 600;
+        const height = 470;
         const centerX = this.scale.width / 2;
         const left = centerX - width / 2;
         const top = Math.max(24, this.scale.height / 2 - height / 2);

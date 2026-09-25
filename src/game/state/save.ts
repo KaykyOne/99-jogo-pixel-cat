@@ -9,6 +9,12 @@ export type SaveData = {
     phaseIndex: number;
     difficulty: Difficulty;
     clearedPhases: number[];
+    // Chaves das fases (PhaseDefinition.key) cujo boss já foi derrotado. Boss
+    // só se derrota uma vez: voltar à fase não o faz nascer de novo. Por chave
+    // e não por índice pelo mesmo motivo do spawn do boss (a vila deslocou
+    // os índices uma vez; pode acontecer de novo). Opcional: saves antigos
+    // não têm o campo e são lidos como "nenhum boss derrotado".
+    defeatedBosses?: string[];
     // Os 6 slots do inventário (não inclui moedas, que são separadas).
     //
     // Opcional de propósito: quem grava um save novo do menu ("Novo Jogo") não
@@ -46,6 +52,9 @@ export function loadSave(): SaveData | null {
             // Saves criados antes do mapa RPG não tinham este campo.
             clearedPhases: Array.isArray(parsed.clearedPhases)
                 ? parsed.clearedPhases.filter((index): index is number => typeof index === 'number')
+                : [],
+            defeatedBosses: Array.isArray(parsed.defeatedBosses)
+                ? parsed.defeatedBosses.filter((key): key is string => typeof key === 'string')
                 : [],
             // Leitura tolerante: sem o campo, `inventory` continua undefined —
             // e não vira um array vazio. A diferença importa: undefined é "run
@@ -87,6 +96,7 @@ export function saveProgress(scene: Scene, patch: Partial<SaveData>): void {
         phaseIndex: current?.phaseIndex ?? 0,
         difficulty: (scene.registry.get('difficulty') as Difficulty) ?? current?.difficulty ?? 'normal',
         clearedPhases: current?.clearedPhases ?? [],
+        defeatedBosses: current?.defeatedBosses ?? [],
         inventory: inventory ? inventory.serialize() : current?.inventory,
         coins: coins ? coins.serialize() : current?.coins,
         ...patch
@@ -103,7 +113,11 @@ export function clearSave(): void {
 
 function isSaveData(
     value: unknown
-): value is Omit<SaveData, 'clearedPhases' | 'inventory'> & { clearedPhases?: unknown; inventory?: unknown } {
+): value is Omit<SaveData, 'clearedPhases' | 'inventory' | 'defeatedBosses'> & {
+    clearedPhases?: unknown;
+    inventory?: unknown;
+    defeatedBosses?: unknown;
+} {
     if (typeof value !== 'object' || value === null) {
         return false;
     }

@@ -1,5 +1,6 @@
 import { GameObjects, Input, Scene } from 'phaser';
 
+import { loadControls } from '../config/controls';
 import { LootManager, TargetPosition } from '../loot/LootManager';
 import { isShopId } from '../shop/shop-config';
 import { ShopPanel } from '../shop/ShopPanel';
@@ -17,11 +18,15 @@ import { syncRunInventory } from './run-inventory';
 //
 // Controles do inventário (barra de 6 slots no rodapé). Um slot fica
 // ESCOLHIDO (destacado) e as ações valem sobre ele:
-//   Roda do mouse / Tab   escolhe o slot (Shift+Tab volta)
+//   Roda do mouse / Tab   escolhe o slot (C volta)
 //   F                     usa o item escolhido (cura consome 1, arma equipa)
-//   G                     larga 1 unidade no chão (Shift+G larga o slot todo)
+//   G                     larga 1 unidade no chão (H larga o slot todo)
 //   R                     cura rápida: usa a primeira cura da mochila, sem
 //                         precisar escolher — é a tecla do aperto no combate
+//   4 / 5 / 6             usam direto os slots 1, 2 e 3
+// Todas as teclas acima são as padrão e mudam no menu (config/controls.ts).
+// Nenhuma é modificador: o Shift é do dash, e Shift+tecla aqui dava um dash
+// junto.
 //
 // Contrato de eventos (scene.events):
 //   escuta  'enemy:died'     -> drops (dentro do LootManager)
@@ -43,10 +48,13 @@ const WHEEL_STEP_MS = 90;
 
 type InventoryKeys = {
     next: Input.Keyboard.Key;
+    prev: Input.Keyboard.Key;
     use: Input.Keyboard.Key;
     drop: Input.Keyboard.Key;
+    dropStack: Input.Keyboard.Key;
     quickHeal: Input.Keyboard.Key;
-    shift: Input.Keyboard.Key;
+    // Uso direto dos três primeiros slots.
+    slots: Input.Keyboard.Key[];
 };
 
 export class EconomySystem {
@@ -85,12 +93,15 @@ export class EconomySystem {
         this.hud.setEquippedWeapon('sword');
 
         const keyboard = scene.input.keyboard!;
+        const controls = loadControls();
         this.keys = {
-            next: keyboard.addKey(Input.Keyboard.KeyCodes.TAB),
-            use: keyboard.addKey(Input.Keyboard.KeyCodes.F),
-            drop: keyboard.addKey(Input.Keyboard.KeyCodes.G),
-            quickHeal: keyboard.addKey(Input.Keyboard.KeyCodes.R),
-            shift: keyboard.addKey(Input.Keyboard.KeyCodes.SHIFT)
+            next: keyboard.addKey(controls.nextSlot),
+            prev: keyboard.addKey(controls.prevSlot),
+            use: keyboard.addKey(controls.useItem),
+            drop: keyboard.addKey(controls.dropItem),
+            dropStack: keyboard.addKey(controls.dropStack),
+            quickHeal: keyboard.addKey(controls.quickHeal),
+            slots: [controls.slot1, controls.slot2, controls.slot3].map(code => keyboard.addKey(code))
         };
 
         // O Inventory e CoinSystem vivem no registry e sobrevivem à cena; sem guardar o
@@ -141,23 +152,33 @@ export class EconomySystem {
         // Lê TODAS antes do gate: JustDown só zera quando é consultado, então
         // um F apertado com o diálogo aberto dispararia sozinho ao fechar.
         const next = Input.Keyboard.JustDown(this.keys.next);
+        const prev = Input.Keyboard.JustDown(this.keys.prev);
         const use = Input.Keyboard.JustDown(this.keys.use);
         const drop = Input.Keyboard.JustDown(this.keys.drop);
+        const dropStack = Input.Keyboard.JustDown(this.keys.dropStack);
         const quickHeal = Input.Keyboard.JustDown(this.keys.quickHeal);
+        const slotPressed = this.keys.slots.findIndex(key => Input.Keyboard.JustDown(key));
 
         if (this.inputBlocked) {
             return;
         }
 
-        const shift = this.keys.shift.isDown;
+        if (slotPressed >= 0) {
+            this.selectSlot(slotPressed);
+            this.useSlot(slotPressed);
+        }
+
         if (next) {
-            this.selectSlot(this.selectedIndex + (shift ? -1 : 1));
+            this.selectSlot(this.selectedIndex + 1);
+        }
+        if (prev) {
+            this.selectSlot(this.selectedIndex - 1);
         }
         if (use) {
             this.useSlot(this.selectedIndex);
         }
-        if (drop) {
-            this.dropSlot(this.selectedIndex, shift);
+        if (drop || dropStack) {
+            this.dropSlot(this.selectedIndex, dropStack);
         }
         if (quickHeal) {
             this.useQuickHeal();

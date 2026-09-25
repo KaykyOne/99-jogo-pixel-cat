@@ -23,7 +23,7 @@ export type EnemyPoses = {
 
 // Converte um desenho de Graphics numa textura registrada no TextureManager.
 // Graphics é destruído em seguida: ele serviu de molde, não fica na cena.
-function makeTexture(scene: Scene, key: string, draw: PoseDrawer): void {
+export function makeTexture(scene: Scene, key: string, draw: PoseDrawer): void {
     // Regenerar a mesma textura a cada troca de fase vaza memória de GPU e o
     // Phaser reclama de chave duplicada.
     if (scene.textures.exists(key)) {
@@ -36,7 +36,7 @@ function makeTexture(scene: Scene, key: string, draw: PoseDrawer): void {
     g.destroy();
 }
 
-function makeSequence(scene: Scene, prefix: string, poses: PoseDrawer[]): string[] {
+export function makeSequence(scene: Scene, prefix: string, poses: PoseDrawer[]): string[] {
     return poses.map((draw, index) => {
         const key = `${prefix}-${index}`;
         makeTexture(scene, key, draw);
@@ -124,6 +124,9 @@ export function registerProjectileArt(
 // fica riscado por dentro.
 export type Shape =
     | { kind: 'circle'; x: number; y: number; r: number; color: number }
+    // Elipse pelo CENTRO (x, y) e diâmetros w/h — a forma de corpo de sapo e
+    // de javali, que um círculo ou um retângulo não fazem.
+    | { kind: 'ellipse'; x: number; y: number; w: number; h: number; color: number }
     | { kind: 'rect'; x: number; y: number; w: number; h: number; color: number }
     | { kind: 'tri'; p: [number, number, number, number, number, number]; color: number };
 
@@ -134,6 +137,11 @@ function drawShape(g: GameObjects.Graphics, s: Shape, grow: number, color: numbe
 
     if (s.kind === 'circle') {
         g.fillCircle(s.x, s.y, s.r + grow);
+        return;
+    }
+
+    if (s.kind === 'ellipse') {
+        g.fillEllipse(s.x, s.y, s.w + grow * 2, s.h + grow * 2);
         return;
     }
 

@@ -63,6 +63,10 @@ export abstract class BossBase extends BaseEnemy {
     private readonly barPhaseTag: GameObjects.Text;
     private telegraphTween?: Phaser.Tweens.Tween;
 
+    // Recuperação extra somada à do padrão atual (o javali tonto depois de
+    // bater na parede). Consumida ao entrar em 'recover'.
+    protected extraRecoverMs = 0;
+
     protected constructor(scene: Scene, x: number, y: number, definition: BossDefinition, target: Player) {
         super(scene, x, y, definition.artKey, target, definition.stats, definition.scale);
 
@@ -118,6 +122,11 @@ export abstract class BossBase extends BaseEnemy {
     // a partir daqui a máquina de estados do boss assume o controle.
     protected updateAttack(time: number): void {
         const delta = this.scene.game.loop.delta;
+        // Ação física em andamento (sapo no ar, língua esticada): a subclasse
+        // é dona do corpo e a coreografia espera, sem mexer na velocidade.
+        if (this.isActionLocked()) {
+            return;
+        }
         if (this.introState !== 'done') {
             this.updateIntro(time, delta);
             return;
@@ -150,7 +159,9 @@ export abstract class BossBase extends BaseEnemy {
                 }
                 if (this.stageTimer <= 0) {
                     this.currentPattern && this.onPatternEnd(this.currentPattern.id);
-                    this.enterStage('recover', (this.currentPattern?.recoverMs ?? 600) * scale);
+                    const recover = (this.currentPattern?.recoverMs ?? 600) * scale + this.extraRecoverMs;
+                    this.extraRecoverMs = 0;
+                    this.enterStage('recover', recover);
                 }
                 break;
 
@@ -159,7 +170,7 @@ export abstract class BossBase extends BaseEnemy {
                 // Freia, mas não trava: parar de imediato faria a investida
                 // terminar como se tivesse batido numa parede invisível.
                 this.setVelocityX(this.arcadeBody.velocity.x * 0.86);
-                this.play(`${this.artAnimationPrefix}-idle`, true);
+                this.play(this.recoverAnimationKey(), true);
                 if (this.stageTimer <= 0) {
                     this.stage = 'idle';
                     this.currentPattern = null;
@@ -171,6 +182,9 @@ export abstract class BossBase extends BaseEnemy {
     // Fora do alcance (ou com o jogador morto) o boss volta a andar de um lado
     // para o outro na arena, em vez de congelar.
     protected updatePatrol(delta: number): void {
+        if (this.isActionLocked()) {
+            return;
+        }
         this.stage = 'idle';
         this.currentPattern = null;
         this.clearTelegraph();
@@ -186,6 +200,32 @@ export abstract class BossBase extends BaseEnemy {
     protected onPatternEnd(_patternId: string): void {}
     // Chamado uma vez, ao cruzar o limiar da fase 2.
     protected onEnterPhase2(): void {}
+    // Verdadeiro enquanto a subclasse controla o corpo sozinha (ver
+    // updateAttack). Nada de coreografia, patrulha ou freio nesse meio-tempo.
+    protected isActionLocked(): boolean {
+        return false;
+    }
+    // Animação do windup de cada padrão. Padrão: a sequência de ataque.
+    protected telegraphAnimationKey(_patternId: string): string {
+        return `${this.artAnimationPrefix}-attack-1`;
+    }
+    // Animação da abertura depois do golpe.
+    protected recoverAnimationKey(): string {
+        return `${this.artAnimationPrefix}-idle`;
+    }
+
+    // Termina a execução do padrão agora (o golpe acabou antes da janela).
+    protected endExecuteEarly(): void {
+        if (this.stage === 'execute') {
+            this.stageTimer = 0;
+        }
+    }
+
+    // Padrão em windup neste instante, ou null. O javali levanta poeira
+    // enquanto cava o chão, por exemplo.
+    protected get telegraphingPatternId(): string | null {
+        return this.stage === 'telegraph' ? this.currentPattern?.id ?? null : null;
+    }
 
     protected get artAnimationPrefix(): string {
         return this.definition.artKey;
@@ -276,7 +316,7 @@ export abstract class BossBase extends BaseEnemy {
 
         const scale = this.bossPhase === 2 ? this.definition.phase2TimeScale : 1;
         this.enterStage('telegraph', pattern.telegraphMs * scale);
-        this.startTelegraph();
+        this.startTelegraph(pattern.id);
     }
 
     // Rodízio: percorre a lista a partir do cursor e pega o primeiro padrão
@@ -317,9 +357,9 @@ export abstract class BossBase extends BaseEnemy {
     // Windup visível: o boss encolhe/pulsa e ganha um contorno claro. É a
     // única informação que o jogador tem antes do golpe, então precisa ser
     // impossível de perder de vista — vale mais que qualquer barra na tela.
-    private startTelegraph(): void {
+    private startTelegraph(patternId: string): void {
         this.setVelocityX(0);
-        this.play(`${this.artAnimationPrefix}-attack-1`, true);
+        this.play(this.telegraphAnimationKey(patternId), true);
         this.setTint(0xffe08a);
 
         this.telegraphTween?.remove();

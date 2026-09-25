@@ -16,10 +16,10 @@ export const ECONOMY = {
     // Preço de uma poção em moedas. ~1 morte comum de sorte, ou 2 na média.
     POTION_PRICE: 15,
 
-    // Lote de venda da maçã: 5 maçãs -> 1 moeda. Vender em lote evita moeda
-    // fracionada e evita obrigar o jogador a encher um slot antes de vender.
-    APPLE_LOT: 5,
-    APPLE_LOT_PRICE: 1
+    // Venda da maçã: 1 maçã -> 8 moedas (meia poção). A maçã é rara e não
+    // cura, então precisa valer a viagem de volta à vila.
+    APPLE_LOT: 1,
+    APPLE_LOT_PRICE: 8
 } as const;
 
 export type ShopId = 'rabbit-shop' | 'capybara-shop';

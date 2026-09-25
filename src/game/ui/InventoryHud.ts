@@ -1,5 +1,6 @@
 import { GameObjects, Scene } from 'phaser';
 
+import { controlLabel } from '../config/controls';
 import { CoinSystem } from '../items/CoinSystem';
 import { Inventory, INVENTORY_SLOTS } from '../items/Inventory';
 import { drawItemBlocks } from '../items/item-art';
@@ -199,10 +200,10 @@ export class InventoryHud {
         const name = def.stackSize > 1 ? `${def.name} x${slot.quantity}` : def.name;
 
         if (def.kind === 'weapon') {
-            return slot.id === this.equippedWeapon ? `${name} (na mão)` : `${name}  ·  F equipar`;
+            return slot.id === this.equippedWeapon ? `${name} (na mão)` : `${name}  ·  ${controlLabel('useItem')} equipar`;
         }
         if (def.kind === 'consumable' && def.healAmount) {
-            return `${name}  ·  F usar (+${def.healAmount} vida)`;
+            return `${name}  ·  ${controlLabel('useItem')} usar (+${def.healAmount} vida)`;
         }
         return `${name}  ·  serve para a loja`;
     }

@@ -1,5 +1,6 @@
 import { GameObjects, Input, Scene, Time, Types } from 'phaser';
 
+import { controlLabel, formatControls, loadControls } from '../config/controls';
 import { NPC_UI } from '../world/npc-config';
 import { drawParchment, drawWoodFrame, UI_COLORS, UI_CSS, uiText, uiTextOutlined } from './ui-theme';
 
@@ -66,10 +67,11 @@ export class DialogueBox {
             .setVisible(false);
 
         const keyboard = scene.input.keyboard!;
-        this.advanceKey = keyboard.addKey(Input.Keyboard.KeyCodes.E);
-        this.closeKey = keyboard.addKey(Input.Keyboard.KeyCodes.ESC);
-        this.upKey = keyboard.addKey(Input.Keyboard.KeyCodes.W);
-        this.downKey = keyboard.addKey(Input.Keyboard.KeyCodes.S);
+        const controls = loadControls();
+        this.advanceKey = keyboard.addKey(controls.interact);
+        this.closeKey = keyboard.addKey(controls.pause);
+        this.upKey = keyboard.addKey(controls.up);
+        this.downKey = keyboard.addKey(controls.down);
 
         scene.scale.on('resize', this.layout, this);
     }
@@ -79,7 +81,8 @@ export class DialogueBox {
     }
 
     open(request: DialogueRequest, onResult: (value: string | null) => void): void {
-        this.lines = request.lines.length > 0 ? request.lines : ['...'];
+        // As falas podem citar teclas como `{dash}`: troca pela tecla atual.
+        this.lines = request.lines.length > 0 ? request.lines.map(line => formatControls(line)) : ['...'];
         this.options = request.options ?? [];
         this.onResult = onResult;
         this.pageIndex = 0;
@@ -231,13 +234,18 @@ export class DialogueBox {
 
     private refreshFooter(): void {
         if (this.phase === 'choosing') {
-            this.footerText.setText('W/S escolher  ·  E confirmar  ·  ESC fechar');
+            const up = controlLabel('up');
+            const down = controlLabel('down');
+            this.footerText.setText(
+                `${up}/${down} escolher  ·  ${controlLabel('interact')} confirmar  ·  ${controlLabel('pause')} fechar`
+            );
             return;
         }
 
         const isLastPage = this.pageIndex >= this.lines.length - 1;
-        const advance = isLastPage && this.options.length === 0 ? 'E fechar' : 'E continuar';
-        this.footerText.setText(`${advance}  ·  ESC fechar`);
+        const interact = controlLabel('interact');
+        const advance = isLastPage && this.options.length === 0 ? `${interact} fechar` : `${interact} continuar`;
+        this.footerText.setText(`${advance}  ·  ${controlLabel('pause')} fechar`);
     }
 
     private makeText(style: Types.GameObjects.Text.TextStyle): GameObjects.Text {

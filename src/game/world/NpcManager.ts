@@ -1,5 +1,6 @@
 import { Input, Physics, Scene } from 'phaser';
 
+import { loadControls } from '../config/controls';
 import { Npc } from '../entities/Npc';
 import { Player } from '../entities/Player';
 import { DialogueBox, DialogueRequest } from '../ui/DialogueBox';
@@ -29,7 +30,7 @@ export class NpcManager {
         this.scene = scene;
         this.player = player;
         this.dialogue = new DialogueBox(scene);
-        this.interactKey = scene.input.keyboard!.addKey(Input.Keyboard.KeyCodes.E);
+        this.interactKey = scene.input.keyboard!.addKey(loadControls().interact);
 
         for (const def of defs) {
             this.npcs.push(new Npc(scene, def));

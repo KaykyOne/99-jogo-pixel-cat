@@ -1,5 +1,6 @@
 import { GameObjects, Scene, Tweens } from 'phaser';
 
+import { controlLabel } from '../config/controls';
 import { drawKeyCap, UI_CSS, uiText } from '../ui/ui-theme';
 import { NpcDef, NPC_UI } from '../world/npc-config';
 import { GROUND_Y } from '../world/phases';
@@ -123,7 +124,12 @@ export class Npc extends GameObjects.Container {
         const box = scene.add.graphics();
         drawKeyCap(box, 0, 0, 28);
 
-        const label = scene.add.text(0, -2, 'E', uiText(17, UI_CSS.ink)).setOrigin(0.5);
+        // Tecla de conversar configurada; nomes longos ("Enter") encolhem
+        // para caber na tecla desenhada.
+        const keyName = controlLabel('interact');
+        const label = scene.add
+            .text(0, -2, keyName, uiText(keyName.length > 1 ? 10 : 17, UI_CSS.ink))
+            .setOrigin(0.5);
 
         // Objeto de cena, e não filho do NPC: dentro de um Container o depth do
         // filho é ignorado (vale o do pai), e o ícone precisa do seu próprio

@@ -78,54 +78,79 @@ function contact(amount: number): DamageSource {
     return { amount, kind: 'physical', knockbackX: 300, knockbackY: -240 };
 }
 
-// --- Boss 1: floresta -------------------------------------------------------
-// Corpo-a-corpo pesado. Dois padrões na fase 1 (investida e salto com onda de
-// impacto) e, abaixo de 50%, acelera e passa a invocar reforços.
-export const FOREST_BOSS_BEHAVIOR = {
-    // Investida: velocidade e distância máxima antes de frear.
-    chargeSpeed: 430,
-    chargeMaxDistance: 620,
-    // Dano do atropelo. Só acerta uma vez por investida.
-    chargeHitRange: 90,
-    chargeDamage: { amount: 2, kind: 'physical', knockbackX: 420, knockbackY: -300 } satisfies DamageSource,
+// --- Boss 1: floresta — SAPO-REI -------------------------------------------
+// Um sapo de verdade: fica parado no lugar e caça com a língua, e se move aos
+// saltos. A língua gruda em quem acerta, puxa até a boca e cospe longe; o
+// salto é alto e cai EM CIMA do jogador (a sombra no chão marca onde). Na
+// fase 2 os saltos viram uma sequência de pulos seguidos.
+export const FROG_BOSS_BEHAVIOR = {
+    // Língua: alcance, velocidade de ida/volta e o raio da ponta que gruda.
+    tongueRange: 470,
+    tongueSpeed: 1500,
+    tongueRetractSpeed: 1300,
+    tongueHitRadius: 44,
+    // A língua mira no jogador, mas não sai a mais que isto da horizontal:
+    // sapo não lambe o teto.
+    tongueMaxAngleDegrees: 32,
+    // Na fase 2 a língua sai mais rápido.
+    phase2TongueSpeedScale: 1.3,
+    // Quem é pego leva o dano do toque, é puxado até a boca, fica preso um
+    // instante (tempo de acabar a invencibilidade do toque) e é cuspido.
+    tongueCatchDamage: { amount: 1, kind: 'physical', knockbackX: 0, knockbackY: 0 } satisfies DamageSource,
+    pullSpeed: 1000,
+    holdMs: 620,
+    spitDamage: { amount: 1, kind: 'physical', knockbackX: 460, knockbackY: -360 } satisfies DamageSource,
 
-    // Salto: impulso vertical e horizontal em direção ao jogador.
+    // Salto: impulso vertical e teto do impulso horizontal. O horizontal é
+    // calculado para cair exatamente onde o jogador estava na decolagem.
+    // Alto, mas sem sumir pelo topo da tela (o mundo tem 768px de altura).
     leapVelocityY: -760,
-    leapSpeedX: 260,
-    // Onda de impacto ao aterrissar: raio no chão e dano.
-    shockwaveRadius: 260,
-    shockwaveDamage: { amount: 2, kind: 'physical', knockbackX: 360, knockbackY: -380 } satisfies DamageSource,
-    // Altura máxima acima do chão em que a onda ainda alcança o jogador —
-    // pular na hora certa é a esquiva, senão a onda seria inescapável.
-    shockwaveVerticalRange: 120,
+    leapMaxSpeedX: 640,
+    // Esmagamento: quem estiver debaixo dele na queda ou colado no pouso.
+    stompRadius: 115,
+    stompVerticalRange: 130,
+    stompDamage: { amount: 2, kind: 'physical', knockbackX: 380, knockbackY: -420 } satisfies DamageSource,
+    // Onda do pouso: mais larga, mais fraca, e só pega quem está no chão —
+    // pular na hora certa escapa dela.
+    shockwaveRadius: 250,
+    shockwaveDamage: { amount: 1, kind: 'physical', knockbackX: 300, knockbackY: -300 } satisfies DamageSource,
 
-    // Fase 2: quantos inimigos comuns são invocados por vez e a que distância.
-    summonCount: 2,
-    summonSpreadX: 220,
-    // Teto de invocados VIVOS ao mesmo tempo. Sem ele o padrão de invocação
-    // volta ao rodízio a cada ciclo e a arena entope de aranhas até a luta
-    // virar impossível — o jogador nunca chega a bater no boss.
-    maxAliveSummons: 2
+    // Fase 2: sequência de pulos mais baixos e rápidos, cada um mirando de novo.
+    hopCount: 3,
+    hopVelocityY: -640,
+    hopPauseMs: 260
 } as const;
 
-// --- Boss 2: deserto --------------------------------------------------------
-// Luta de distância. Salva em leque, reposicionamento por dash e, na fase 2,
-// um projétil que persegue.
-export const DESERT_BOSS_BEHAVIOR = {
-    // Leque: quantos tiros e a abertura total do arco, em graus.
-    fanShots: 5,
-    fanSpreadDegrees: 54,
-    fanProjectileSpeed: 420,
+// --- Boss 2: deserto — JAVALI -----------------------------------------------
+// Pesado e em linha reta. Cava o chão (levantando poeira: é o aviso) e dispara
+// numa investida que passa do jogador; batendo na parede, fica tonto e abre a
+// guarda. Colado nele, dá uma chifrada que joga para cima. Na fase 2 a
+// investida vira ida e volta.
+export const BOAR_BOSS_BEHAVIOR = {
+    chargeSpeed: 580,
+    phase2ChargeSpeed: 660,
+    // Aceleração até a velocidade máxima: arrancar do zero ao máximo num
+    // frame lia como teleporte.
+    chargeAccel: 2600,
+    // Quanto ele passa do jogador antes de frear, e o teto de uma passada.
+    chargeOvershoot: 260,
+    chargeMaxDistance: 1100,
+    chargeDamage: { amount: 2, kind: 'physical', knockbackX: 540, knockbackY: -380 } satisfies DamageSource,
+    // Derrapagem ao frear: desaceleração e pausa antes de virar para a volta.
+    skidDecel: 2400,
+    turnPauseMs: 340,
+    // Passadas por investida em cada fase da luta.
+    passes: { 1: 1, 2: 2 },
+    // Bater na parede: tontura somada à recuperação normal.
+    wallStunMs: 1900,
+    // Degrau no caminho (a arena do deserto tem blocos de areia): ele pula
+    // por cima e segue correndo. Só é "parede" o que esse pulo não vence.
+    stepHopVelocity: 660,
 
-    // Dash de reposicionamento: velocidade e para onde ele tenta ir.
-    dashSpeed: 620,
-    // Distância que ele considera confortável para atirar.
-    preferredRange: 420,
-
-    // Projétil teleguiado da fase 2.
-    homingSpeed: 300,
-    homingAccel: 900,
-    homingLifespanMs: 3200
+    // Chifrada de perto: estocada curta e dano que arremessa para o alto.
+    goreRange: 175,
+    goreLungeSpeed: 380,
+    goreDamage: { amount: 2, kind: 'physical', knockbackX: 260, knockbackY: -620 } satisfies DamageSource
 } as const;
 
 // --- Boss 3: neve -----------------------------------------------------------
@@ -149,62 +174,61 @@ export const SNOW_BOSS_BEHAVIOR = {
 export const BOSSES: Record<BossKey, BossDefinition> = {
     forest: {
         key: 'forest',
-        name: 'GUARDIÃO DO CARVALHO',
+        name: 'SAPO-REI DO BREJO',
         intro: [
-            'Mais um pé pisando a minha mata...',
-            'Essas raízes guardam a floresta há mil anos. Você não passa delas.'
+            'Croooac... Quem pisa no meu brejo sem pedir licença?',
+            'Minha língua alcança longe. E o que ela pega, eu engulo.'
         ],
-        artKey: 'boss-forest',
+        artKey: 'boss-frog',
         scale: 4.5,
 
         stats: {
-            // 60 de vida com defesa 1 fazia TODO golpe de espada valer 1 (o
-            // mínimo garantido por resolveDamage): 60 acertos limpos, ~40s
-            // pendurado no boss sem errar um. 38 com defesa 0 devolve o peso do
-            // combo (1+1+2 por ciclo) sem tirar a resistência física, que é o
-            // que ainda favorece arco e magia contra ele.
+            // 38 com defesa 0: com defesa 1, todo golpe de espada valia o
+            // mínimo de 1 e a luta virava 60 acertos iguais.
             hp: 38,
             defense: 0,
             resistance: { physical: 0.1 },
-            patrolSpeed: 70,
-            contactDamage: contact(2),
-            combat: bossCombat({ chaseSpeed: 150 }),
-            body: { ...BOSS_BODY }
+            patrolSpeed: 60,
+            // Encostar no sapo machuca pouco: o perigo é a língua e o pulo.
+            contactDamage: contact(1),
+            combat: bossCombat({ chaseSpeed: 110 }),
+            // Largo e baixo (o corpo inclui a cabeça, sem a coroa).
+            body: { width: 38, height: 28, offsetX: 5, offsetY: 19 }
         },
 
         phase2HpRatio: 0.5,
-        phase2TimeScale: 0.68,
+        phase2TimeScale: 0.72,
 
         patterns: [
-            // Investida: telegrafo longo porque o golpe é rápido e forte. Se o
-            // windup fosse curto, não haveria como reagir.
+            // Língua: o windup é o papo inflando e a boca abrindo. Só de média
+            // distância — colado nele, a resposta é o salto.
             {
-                id: 'charge',
+                id: 'tongue',
                 minBossPhase: 1,
-                telegraphMs: 700,
-                executeMs: 1500,
-                recoverMs: 900,
-                minRange: 160,
-                maxRange: 760
+                telegraphMs: 720,
+                executeMs: 4000,
+                recoverMs: 750,
+                minRange: 130,
+                maxRange: 480
             },
-            // Salto: alcança quem fugiu para longe e pune quem ficou colado.
+            // Salto em cima do jogador: agachado e tremendo é o aviso; no ar,
+            // a sombra no chão mostra onde ele vai cair.
             {
                 id: 'leap',
                 minBossPhase: 1,
-                telegraphMs: 560,
-                executeMs: 1400,
-                recoverMs: 1000,
-                minRange: 0,
-                maxRange: 620
-            },
-            // Fase 2: chama reforço. O jogador passa a ter que escolher entre
-            // limpar os invocados e continuar batendo no boss.
-            {
-                id: 'summon',
-                minBossPhase: 2,
                 telegraphMs: 620,
-                executeMs: 400,
-                recoverMs: 1100,
+                executeMs: 4000,
+                recoverMs: 900,
+                minRange: 0,
+                maxRange: 900
+            },
+            // Fase 2: três pulos seguidos, cada um mirando de novo.
+            {
+                id: 'hops',
+                minBossPhase: 2,
+                telegraphMs: 680,
+                executeMs: 7000,
+                recoverMs: 1150,
                 minRange: 0,
                 maxRange: 900
             }
@@ -213,56 +237,51 @@ export const BOSSES: Record<BossKey, BossDefinition> = {
 
     desert: {
         key: 'desert',
-        name: 'SENTINELA DAS DUNAS',
+        name: 'JAVALI PRESA-DE-OSSO',
         intro: [
-            'A areia me contou que você vinha.',
-            'E ela também já sabe onde vai te enterrar.'
+            'Hrrmf... HRMF! Cheiro de forasteiro na minha areia.',
+            'Aqui no deserto não tem onde se esconder. Corre, que eu corro mais.'
         ],
-        artKey: 'boss-desert',
-        scale: 4.2,
+        artKey: 'boss-boar',
+        scale: 4.0,
 
         stats: {
             hp: 48,
             defense: 1,
             resistance: { fire: 0.3 },
             patrolSpeed: 80,
-            contactDamage: contact(2),
-            combat: bossCombat({ amount: 2, chaseSpeed: 170, knockbackX: 280 }),
-            body: { ...BOSS_BODY }
+            contactDamage: contact(1),
+            combat: bossCombat({ amount: 2, chaseSpeed: 150, knockbackX: 280 }),
+            // Só pernas e a metade de baixo do corpo: a crina e a corcunda não
+            // colidem. Com o corpo inteiro (~110px) o pulo do jogador passava
+            // raspando só no ápice e pular a investida era quase impossível.
+            body: { width: 40, height: 20, offsetX: 3, offsetY: 27 }
         },
 
         phase2HpRatio: 0.5,
-        phase2TimeScale: 0.7,
+        phase2TimeScale: 0.75,
 
         patterns: [
+            // Investida: cava o chão bufando (telegrafo longo, porque o golpe
+            // é rápido e forte) e dispara em linha reta.
             {
-                id: 'fan',
+                id: 'charge',
                 minBossPhase: 1,
-                telegraphMs: 620,
-                executeMs: 700,
-                recoverMs: 950,
-                minRange: 180,
-                maxRange: 900
+                telegraphMs: 900,
+                executeMs: 6000,
+                recoverMs: 850,
+                minRange: 150,
+                maxRange: 1000
             },
-            // O dash não machuca: é reposicionamento. Serve para ele nunca
-            // deixar o jogador colado, que é onde a luta seria trivial.
+            // Chifrada: só colado. Pune quem fica grudado batendo.
             {
-                id: 'reposition',
+                id: 'gore',
                 minBossPhase: 1,
-                telegraphMs: 320,
+                telegraphMs: 480,
                 executeMs: 420,
-                recoverMs: 380,
+                recoverMs: 750,
                 minRange: 0,
-                maxRange: 900
-            },
-            {
-                id: 'homing',
-                minBossPhase: 2,
-                telegraphMs: 720,
-                executeMs: 500,
-                recoverMs: 1000,
-                minRange: 120,
-                maxRange: 900
+                maxRange: 190
             }
         ]
     },

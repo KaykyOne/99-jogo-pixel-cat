@@ -1,5 +1,6 @@
 import { GameObjects, Input, Scene } from 'phaser';
 
+import { controlLabel, loadControls } from '../config/controls';
 import { getDifficultyModifiersFor } from '../config/difficulty';
 import { CoinSystem } from '../items/CoinSystem';
 import { Inventory } from '../items/Inventory';
@@ -59,7 +60,12 @@ export class ShopPanel {
         this.coinText = scene.add.text(0, 0, '', uiText(15, UI_CSS.ink)).setOrigin(1, 0);
         this.greeting = scene.add.text(0, 0, '', uiText(13, UI_CSS.inkSoft));
         this.message = scene.add.text(0, 0, '', uiText(13, MESSAGE_FAIL));
-        this.hint = scene.add.text(0, 0, 'W/S ou setas escolher  ·  E confirmar  ·  ESC sair', uiText(12, UI_CSS.inkSoft));
+        this.hint = scene.add.text(
+            0,
+            0,
+            `${controlLabel('up')}/${controlLabel('down')} ou setas escolher  ·  ${controlLabel('interact')} confirmar  ·  ${controlLabel('pause')} sair`,
+            uiText(12, UI_CSS.inkSoft)
+        );
 
         this.container = scene.add
             .container(0, 0, [
@@ -78,16 +84,17 @@ export class ShopPanel {
 
         const keyboard = scene.input.keyboard!;
         // addKey devolve a MESMA Key quando ela já existe na cena (ESC é do
-        // pause, W/S são do jogador). Isso é o desejado: o painel roda antes da
+        // pause, subir/descer são do jogador). Isso é o desejado: o painel roda antes da
         // cena no update e consome o JustDown, então ESC fecha a loja em vez de
         // pausar por baixo dela.
+        const controls = loadControls();
         this.keys = {
             up: keyboard.addKey(Input.Keyboard.KeyCodes.UP),
             down: keyboard.addKey(Input.Keyboard.KeyCodes.DOWN),
-            altUp: keyboard.addKey(Input.Keyboard.KeyCodes.W),
-            altDown: keyboard.addKey(Input.Keyboard.KeyCodes.S),
-            confirm: keyboard.addKey(Input.Keyboard.KeyCodes.E),
-            close: keyboard.addKey(Input.Keyboard.KeyCodes.ESC)
+            altUp: keyboard.addKey(controls.up),
+            altDown: keyboard.addKey(controls.down),
+            confirm: keyboard.addKey(controls.interact),
+            close: keyboard.addKey(controls.pause)
         };
 
         this.scene.scale.on('resize', this.layout, this);

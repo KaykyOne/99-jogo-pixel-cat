@@ -50,8 +50,8 @@ export const VILLAGE_NPCS: NpcDef[] = [
         height: 50,
         lines: [
             'Piu! Vi você chegando lá do galho, viu?',
-            'A/D anda de um lado pro outro. Parece pouco, mas é o que mais se usa.',
-            'Parede alta demais? Encosta nela e sobe com W ou a seta pra cima; S desce. Só tem uma dessas no mundo inteiro, então guarda essa.'
+            '{left}/{right} anda de um lado pro outro. Parece pouco, mas é o que mais se usa.',
+            'Parede alta demais? Encosta nela e segura {climb} pra agarrar e subir; {up} sobe e {down} desce. Só tem uma dessas no mundo inteiro, então guarda essa.'
         ]
     },
     {
@@ -63,8 +63,8 @@ export const VILLAGE_NPCS: NpcDef[] = [
         height: 58,
         lines: [
             'Croac. Fico aqui olhando a estrada. Alguém tem que olhar.',
-            'Espaço pula. Segurando o pulo sai cheio; soltando no meio, sai curtinho — serve pros dois tipos de vão.',
-            'K é o arranco. Atravessa vão que o pulo sozinho não vence, e passa por dentro de bicho sem levar dano.'
+            '{jump} pula. Segurando o pulo sai cheio; soltando no meio, sai curtinho — serve pros dois tipos de vão.',
+            '{dash} é o arranco. Atravessa vão que o pulo sozinho não vence, e passa por dentro de bicho sem levar dano.'
         ]
     },
     {
@@ -92,6 +92,7 @@ export const VILLAGE_NPCS: NpcDef[] = [
         lines: [
             'Ô, forasteiro. Senta aí no sol que a água hoje tá boa.',
             'Eu compro maçã de quem traz da mata. Moeda eu tenho; paciência, mais ainda.',
+            'Maçã tá rara lá fora, e não se come não, viu? Me traz que eu pago bem: dá meia poção do Coelho.',
             'Se a mochila encher lá fora, volta aqui que a gente resolve.'
         ]
     },
@@ -104,9 +105,9 @@ export const VILLAGE_NPCS: NpcDef[] = [
         height: 92,
         lines: [
             'Essa lâmina aí na sua mão? Fui eu que temperei. Cuida dela.',
-            'Clica esquerdo pra golpear. Não fica batendo no ar: o golpe tem peso, e o bicho do outro lado tem paciência.',
-            'Clica direito e você defende. Aparar no instante certo devolve o susto pra quem veio te dar.',
-            'Teclas 1/2/3 trocam de arma. Na mochila, a roda do mouse escolhe e F usa. No aperto, R bebe a cura na hora. Poção guardada não cura ninguém.'
+            '{attack} (ou clique esquerdo) golpeia. Não fica batendo no ar: o golpe tem peso, e o bicho do outro lado tem paciência.',
+            'Segura {parry} (ou clique direito) e você defende. Aparar no instante certo devolve o susto pra quem veio te dar.',
+            '{weaponSword}/{weaponBow}/{weaponStaff} trocam de arma. Na mochila, {slot1}/{slot2}/{slot3} usam os primeiros slots, a roda do mouse escolhe e {useItem} usa. No aperto, {quickHeal} bebe a cura na hora. Poção guardada não cura ninguém.'
         ]
     }
 ];

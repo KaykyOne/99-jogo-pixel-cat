@@ -5,8 +5,8 @@ import { Boss } from '../Boss';
 import { Player } from '../Player';
 import { BossBase } from './BossBase';
 import { bossDefinitionFor } from './boss-config';
-import { DesertBoss } from './DesertBoss';
-import { ForestBoss } from './ForestBoss';
+import { BoarBoss } from './BoarBoss';
+import { FrogBoss } from './FrogBoss';
 import { SnowBoss } from './SnowBoss';
 
 // Boss genérico das fases que ainda não têm um dedicado. É o inimigo comum
@@ -31,9 +31,9 @@ export function createBoss(
     if (bossDefinitionFor(phaseKey)) {
         switch (phaseKey) {
             case 'forest':
-                return new ForestBoss(scene, x, y, target);
+                return new FrogBoss(scene, x, y, target);
             case 'desert':
-                return new DesertBoss(scene, x, y, target);
+                return new BoarBoss(scene, x, y, target);
             case 'snow':
                 return new SnowBoss(scene, x, y, target);
         }

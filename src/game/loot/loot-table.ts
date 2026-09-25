@@ -1,7 +1,7 @@
 import { ItemId } from '../items/item-catalog';
 
 // Tabela de drop: DADOS. A regra do briefing é literal — ao morrer, uma
-// criatura dropa de 5 a 30 moedas, 1 a 3 maçãs, ou NADA. As três saídas são
+// criatura dropa de 5 a 30 moedas, 1 maçã (rara), ou NADA. As três saídas são
 // entradas da mesma tabela, inclusive o vazio: sem um peso explícito para
 // `null`, todo inimigo sempre dropa alguma coisa.
 
@@ -34,16 +34,20 @@ export type LootRoll = { id: ItemId; quantity: number };
 // Faixas do briefing, isoladas para nunca serem redigitadas errado numa tabela.
 const COIN_MIN = 5;
 const COIN_MAX = 30;
+// A maçã cai sempre UMA por vez, e raramente (ver pesos abaixo).
 const APPLE_MIN = 1;
-const APPLE_MAX = 3;
+const APPLE_MAX = 1;
 
 // Usada por qualquer tipo sem tabela própria (inclusive um inimigo novo que o
-// Agente A adicione depois): 50% moeda, 25% maçã, 25% nada.
+// Agente A adicione depois): 60% moeda, 8% maçã, 32% nada.
+//
+// A maçã é item de troca (não cura) e é rara de propósito: vale 8 moedas na
+// capivara, então cair sempre inflaria a economia.
 export const DEFAULT_LOOT_TABLE: LootTable = {
     entries: [
-        { id: null, weight: 25, min: 0, max: 0 },
-        { id: 'coin', weight: 50, min: COIN_MIN, max: COIN_MAX },
-        { id: 'apple', weight: 25, min: APPLE_MIN, max: APPLE_MAX }
+        { id: null, weight: 32, min: 0, max: 0 },
+        { id: 'coin', weight: 60, min: COIN_MIN, max: COIN_MAX },
+        { id: 'apple', weight: 8, min: APPLE_MIN, max: APPLE_MAX }
     ]
 };
 
@@ -55,32 +59,32 @@ export const LOOT_TABLES: Record<string, LootTable> = {
     spider: {
         entries: [
             { id: null, weight: 45, min: 0, max: 0 },
-            { id: 'coin', weight: 40, min: COIN_MIN, max: 15 },
-            { id: 'apple', weight: 15, min: APPLE_MIN, max: 2 }
+            { id: 'coin', weight: 50, min: COIN_MIN, max: 15 },
+            { id: 'apple', weight: 5, min: APPLE_MIN, max: APPLE_MAX }
         ]
     },
 
     bat: {
         entries: [
-            { id: null, weight: 30, min: 0, max: 0 },
-            { id: 'coin', weight: 45, min: COIN_MIN, max: 20 },
-            { id: 'apple', weight: 25, min: APPLE_MIN, max: APPLE_MAX }
+            { id: null, weight: 35, min: 0, max: 0 },
+            { id: 'coin', weight: 57, min: COIN_MIN, max: 20 },
+            { id: 'apple', weight: 8, min: APPLE_MIN, max: APPLE_MAX }
         ]
     },
 
     llama: {
         entries: [
-            { id: null, weight: 20, min: 0, max: 0 },
-            { id: 'coin', weight: 55, min: 10, max: COIN_MAX },
-            { id: 'apple', weight: 25, min: APPLE_MIN, max: APPLE_MAX }
+            { id: null, weight: 30, min: 0, max: 0 },
+            { id: 'coin', weight: 60, min: 10, max: COIN_MAX },
+            { id: 'apple', weight: 10, min: APPLE_MIN, max: APPLE_MAX }
         ]
     },
 
     hedgehog: {
         entries: [
-            { id: null, weight: 20, min: 0, max: 0 },
-            { id: 'coin', weight: 50, min: 10, max: COIN_MAX },
-            { id: 'apple', weight: 30, min: APPLE_MIN, max: APPLE_MAX }
+            { id: null, weight: 30, min: 0, max: 0 },
+            { id: 'coin', weight: 60, min: 10, max: COIN_MAX },
+            { id: 'apple', weight: 10, min: APPLE_MIN, max: APPLE_MAX }
         ]
     }
 };
@@ -90,8 +94,8 @@ export const LOOT_TABLES: Record<string, LootTable> = {
 // suficiente para pagar 3 a 6 poções, que é o que a fase seguinte vai custar.
 export const BOSS_LOOT_TABLE: LootTable = {
     entries: [
-        { id: 'coin', weight: 70, min: 40, max: 90 },
-        { id: 'apple', weight: 30, min: 3, max: 6 }
+        { id: 'coin', weight: 80, min: 40, max: 90 },
+        { id: 'apple', weight: 20, min: APPLE_MIN, max: APPLE_MAX }
     ]
 };
 

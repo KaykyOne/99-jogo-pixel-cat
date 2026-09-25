@@ -61,15 +61,18 @@ export const ITEMS = {
     },
 
     // STACK EXIGIDO PELO USUÁRIO: 1 pack de maçãs = 10.
+    //
+    // Item de TROCA, não de cura: a maçã é rara, ocupa espaço na mochila e só
+    // serve para vender na capivara. É isso que obriga o jogador a voltar à
+    // vila, vender e comprar poção — a única cura do jogo.
     apple: {
         id: 'apple',
         name: 'Maçã',
-        kind: 'consumable',
+        kind: 'material',
         stackSize: 10,
         color: 0xd94f4f,
         accent: 0x4f7a3d,
-        usable: true,
-        healAmount: 2,
+        usable: false,
         art: [
             '...o....',
             '..oaa...',

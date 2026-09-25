@@ -1,6 +1,7 @@
 import { Input, Physics, Scene } from 'phaser';
 
 import { PlayerCombat } from '../combat/PlayerCombat';
+import { isKeyFree, loadControls } from '../config/controls';
 import { getDifficultyModifiersFor } from '../config/difficulty';
 import { GROUND_Y } from '../world/phases';
 import { PlayerWeapons } from '../combat/PlayerWeapons';
@@ -16,6 +17,11 @@ import { syncFacingOffset } from './physics-utils';
 
 type PlayerKeys = {
     dash: Input.Keyboard.Key;
+    attack: Input.Keyboard.Key;
+    parry: Input.Keyboard.Key;
+    // Segurar agarra a parede escalável e sobe por ela (W/S continuam
+    // controlando a direção).
+    climb: Input.Keyboard.Key;
     jump: Input.Keyboard.Key;
     right: Input.Keyboard.Key;
     left: Input.Keyboard.Key;
@@ -109,26 +115,35 @@ export class Player extends Physics.Arcade.Sprite {
         this.climb = new PlayerClimb(this);
         this.parry = new PlayerParry(scene, this);
 
+        // Teclas configuráveis no menu (ver config/controls.ts). As setas
+        // ↑/↓ são atalho extra de subir/descer, só enquanto nenhuma ação usa
+        // a seta — senão ela faria duas coisas. -1 = tecla que nunca dispara.
+        const controls = loadControls();
+        const arrow = (code: number) => (isKeyFree(code, controls) ? code : -1);
         this.keys = scene.input.keyboard!.addKeys({
-            dash: Input.Keyboard.KeyCodes.K,
-            jump: Input.Keyboard.KeyCodes.SPACE,
-            upArrow: Input.Keyboard.KeyCodes.UP,
-            downArrow: Input.Keyboard.KeyCodes.DOWN,
+            dash: controls.dash,
+            attack: controls.attack,
+            parry: controls.parry,
+            climb: controls.climb,
+            jump: controls.jump,
+            upArrow: arrow(Input.Keyboard.KeyCodes.UP),
+            downArrow: arrow(Input.Keyboard.KeyCodes.DOWN),
 
-            right: Input.Keyboard.KeyCodes.D,
-            left: Input.Keyboard.KeyCodes.A,
+            right: controls.right,
+            left: controls.left,
 
-            up: Input.Keyboard.KeyCodes.W,
-            down: Input.Keyboard.KeyCodes.S,
+            up: controls.up,
+            down: controls.down,
 
-            weaponSword: Input.Keyboard.KeyCodes.ONE,
-            weaponBow: Input.Keyboard.KeyCodes.TWO,
-            weaponStaff: Input.Keyboard.KeyCodes.THREE,
+            weaponSword: controls.weaponSword,
+            weaponBow: controls.weaponBow,
+            weaponStaff: controls.weaponStaff,
 
-            spellCycle: Input.Keyboard.KeyCodes.Q
+            spellCycle: controls.spellCycle
         }) as PlayerKeys;
 
-        // Mouse: esquerdo para atacar, direito para defender.
+        // Mouse continua valendo junto do teclado: esquerdo ataca, direito
+        // defende.
         scene.input.mouse!.disableContextMenu();
         scene.input.on('pointerdown', this.onMouseDown, this);
         scene.input.on('pointerup', this.onMouseUp, this);
@@ -230,7 +245,8 @@ export class Player extends Physics.Arcade.Sprite {
         // pra baixo descem.
         const upHeld = this.keys.up.isDown || this.keys.upArrow.isDown;
         const downHeld = this.keys.down.isDown || this.keys.downArrow.isDown;
-        const holdingClimbKey = upHeld && nearClimbableWall;
+        const grabHeld = this.keys.climb.isDown;
+        const holdingClimbKey = (upHeld || grabHeld) && nearClimbableWall;
         const holdingIntoWall =
             holdingClimbKey ||
             (this.climb.touchingWallDirection === -1 && this.keys.left.isDown) ||
@@ -239,7 +255,8 @@ export class Player extends Physics.Arcade.Sprite {
         const climbInput = manualClimb !== 0 ? manualClimb : holdingClimbKey ? -1 : 0;
 
         this.updateTimers(delta, onGround);
-        this.parry.update(time, this.mouseRightDown);
+        const parryHeld = this.mouseRightDown || this.keys.parry.isDown;
+        this.parry.update(time, parryHeld);
         this.dash.update(time);
         // O dash controla o corpo inteiro (inclusive a gravidade) enquanto dura.
         if (!this.dash.isDashing) {
@@ -265,8 +282,8 @@ export class Player extends Physics.Arcade.Sprite {
             }
         }
 
-        // Mouse direito defende, e a defesa dura enquanto o botão estiver pressionado.
-        // Lê `mouseRightDown` e não um evento único: sendo uma postura sustentada,
+        // A tecla de defesa (ou o mouse direito) defende enquanto estiver pressionada.
+        // Lê o estado segurado e não um evento único: sendo uma postura sustentada,
         // clicar no ar e aterrissar segurando deve entrar em guarda ao tocar o chão,
         // em vez de exigir soltar e clicar de novo.
         //
@@ -279,7 +296,7 @@ export class Player extends Physics.Arcade.Sprite {
             !this.dash.isDashing &&
             !this.climb.isBusy &&
             !this.isSwinging &&
-            this.mouseRightDown
+            parryHeld
         ) {
             this.parry.attempt(time);
         }
@@ -537,11 +554,17 @@ export class Player extends Physics.Arcade.Sprite {
     }
 
     private handleAttack(time: number, onGround: boolean) {
+        // Lida ANTES do gate do modal: JustDown só zera quando consultado, e um
+        // ataque apertado com o diálogo aberto sairia sozinho ao fechar.
+        const attackPressed = Input.Keyboard.JustDown(this.keys.attack);
         if (this.modalOpen) {
             return;
         }
 
         // Só REGISTRA a intenção; o PlayerWeapons executa quando a arma libera.
+        if (attackPressed) {
+            this.attackClickPending = true;
+        }
         if (this.attackClickPending) {
             this.attackClickPending = false;
             this.weapons.queueAttack(time);
