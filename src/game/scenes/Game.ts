@@ -244,6 +244,14 @@ export class PhaseScene extends Scene {
         this.player = new Player(this, spawnX, GROUND_Y - 80);
         this.player.setDepth(20);
 
+        // Vida carregada de um portal; morte/respawn não passa por aqui e
+        // recomeça com a vida cheia.
+        const carriedHp = this.registry.get('carriedHp') as number | undefined;
+        if (typeof carriedHp === 'number') {
+            this.player.restoreHp(carriedHp);
+            this.registry.remove('carriedHp');
+        }
+
         // physics.world.staticBodies guarda CORPOS; os colliders (e os callbacks
         // deles) trabalham com GameObjects. Converter aqui evita entregar um
         // StaticBody onde o callback espera um GameObject — era isso que
@@ -1031,6 +1039,7 @@ export class PhaseScene extends Scene {
         this.player.setControlsEnabled(false);
 
         this.cameras.main.fadeOut(220, 0, 0, 0, () => {
+            this.registry.set('carriedHp', this.player.currentHp);
             this.scene.start(portal.targetKey, { spawnX: portal.spawnX });
         });
     }

@@ -162,6 +162,11 @@ export class Player extends Physics.Arcade.Sprite {
         });
     }
 
+    // Mantém a vida ao trocar de fase (portal).
+    restoreHp(hp: number): void {
+        this.health.setCurrent(hp);
+    }
+
     // Cura vinda do inventário (poção). Health já resolve o teto de HP.
     heal(amount: number): void {
         if (this.playerState === 'dead' || amount <= 0) {

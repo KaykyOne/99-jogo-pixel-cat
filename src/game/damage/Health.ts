@@ -43,6 +43,10 @@ export class Health {
         this.currentHp = Math.min(this.maxHp, this.currentHp + amount);
     }
 
+    setCurrent(hp: number): void {
+        this.currentHp = Math.max(1, Math.min(this.maxHp, hp));
+    }
+
     restoreFull(): void {
         this.currentHp = this.maxHp;
     }

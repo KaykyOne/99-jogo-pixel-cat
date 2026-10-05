@@ -32,8 +32,19 @@ export const COMBAT_PHASE_WIDTH = PHASE_WIDTH * 2 + BOSS_ARENA_WIDTH;
 //
 // Percurso: chão -> monte 1 (1 STEP) -> monte 2 (2 STEPs, GAP_LONG subindo)
 // -> one-way (2 STEPs, GAP_SHORT) -> monte 3 (1 STEP, GAP_LONG descendo).
-function bossArenaPlatforms(): PlatformDef[] {
+//
+// `open`: só plataformas one-way, sem nenhum monte sólido. Para bosses que
+// correm pelo chão (o javali) e travavam dentro dos montes.
+function bossArenaPlatforms(open = false): PlatformDef[] {
     const start = BOSS_ARENA_START;
+    if (open) {
+        return [
+            { x: start + 260, y: GROUND_Y - TERRAIN.STEP, width: 200, height: TERRAIN.THICKNESS, oneWay: true },
+            { x: start + 660, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.THICKNESS, oneWay: true },
+            { x: start + 1060, y: GROUND_Y - TERRAIN.STEP, width: 200, height: TERRAIN.THICKNESS, oneWay: true },
+            { x: start + 1400, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.THICKNESS, oneWay: true }
+        ];
+    }
     return [
         { x: start + 220, y: GROUND_Y - TERRAIN.STEP, width: 240, height: TERRAIN.STEP },
         { x: start + 660, y: GROUND_Y - TERRAIN.STEP * 2, width: 220, height: TERRAIN.STEP * 2 },
@@ -738,7 +749,7 @@ export const PHASES: PhaseDefinition[] = [
             { x: 3760, y: GROUND_Y - TERRAIN.STEP * 2, width: 200, height: TERRAIN.STEP * 2 },
             { x: 4080, y: GROUND_Y - TERRAIN.STEP, width: 220, height: TERRAIN.STEP },
 
-            ...bossArenaPlatforms()
+            ...bossArenaPlatforms(true)
         ]
     },
     // 3 - Neve
